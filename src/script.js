@@ -88,10 +88,6 @@ class ImageEditor {
         const fontSizePopup = document.getElementById('fontSizePopup');
         const customColorPicker = document.getElementById('customColorPicker');
         const strokeDisplay = document.getElementById('strokeDisplay');
-        const textModal = document.getElementById('textModal');
-        const textInput = document.getElementById('textInput');
-        const textOkBtn = document.getElementById('textOkBtn');
-        const textCancelBtn = document.getElementById('textCancelBtn');
         
         toolButtons.forEach(btn => {
             btn.addEventListener('click', () => {
@@ -210,22 +206,6 @@ class ImageEditor {
             });
         }
         
-        textOkBtn.addEventListener('click', () => {
-            if (this.pendingText && textInput.value.trim()) {
-                this.pendingText.text = textInput.value.trim();
-                this.shapes.push(this.pendingText);
-                this.redraw();
-            }
-            this.pendingText = null;
-            textModal.style.display = 'none';
-            textInput.value = '';
-        });
-        
-        textCancelBtn.addEventListener('click', () => {
-            this.pendingText = null;
-            textModal.style.display = 'none';
-            textInput.value = '';
-        });
         
         textInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
@@ -1047,8 +1027,6 @@ class ImageEditor {
     cancelCurrentAction() {
         this.isDrawing = false;
         this.pendingText = null;
-        const textModal = document.getElementById('textModal');
-        textModal.style.display = 'none';
         this.redraw();
     }
     
