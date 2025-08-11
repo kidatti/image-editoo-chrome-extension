@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Image Editoo - 簡易画像エディタ",
+  "version": "0.1.0",
+  "description": "画像を読み込んで、図形や文字を追加できます",
+  "permissions": [
+    "clipboardRead",
+    "clipboardWrite"
+  ],
+  "action": {
+    "default_title": "Image Editoo"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  }
+}
