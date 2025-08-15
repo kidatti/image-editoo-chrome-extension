@@ -191,6 +191,9 @@ class ImageEditor {
         // Drop zone buttons
         const imageInputDrop = document.getElementById('imageInputDrop');
         const pasteBtnDrop = document.getElementById('pasteBtnDrop');
+        const createCanvasBtn = document.getElementById('createCanvasBtn');
+        const createCanvasConfirm = document.getElementById('createCanvasConfirm');
+        const createCanvasCancel = document.getElementById('createCanvasCancel');
         
         if (imageInputDrop) {
             imageInputDrop.addEventListener('change', (e) => this.handleImageUpload(e));
@@ -206,12 +209,28 @@ class ImageEditor {
             });
         }
         
+        if (createCanvasBtn) {
+            createCanvasBtn.addEventListener('click', () => this.showCanvasSizeControls());
+        }
         
-        textInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                textOkBtn.click();
-            }
+        if (createCanvasConfirm) {
+            createCanvasConfirm.addEventListener('click', () => this.createNewCanvas());
+        }
+        
+        if (createCanvasCancel) {
+            createCanvasCancel.addEventListener('click', () => this.hideCanvasSizeControls());
+        }
+        
+        // Preset size buttons
+        const presetSizeBtns = document.querySelectorAll('.preset-size-btn');
+        presetSizeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const width = parseInt(btn.dataset.width);
+                const height = parseInt(btn.dataset.height);
+                this.createCanvasWithSize(width, height);
+            });
         });
+        
     }
     
     handleImageUpload(e) {
@@ -1001,8 +1020,10 @@ class ImageEditor {
             
             deleteBtn.disabled = false;
         } else {
-            // キャンバスに何かあれば削除ボタンを有効にする
-            deleteBtn.disabled = !(this.shapes.length > 0 || this.backgroundImage);
+            // キャンバスが表示されていれば削除ボタンを有効にする
+            const canvas = document.getElementById('canvas');
+            const isCanvasVisible = canvas.classList.contains('visible');
+            deleteBtn.disabled = !isCanvasVisible;
         }
     }
     
@@ -1118,7 +1139,11 @@ class ImageEditor {
     }
     
     clearCanvas() {
-        if (this.shapes.length > 0 || this.backgroundImage) {
+        // キャンバスが表示されている場合は削除可能
+        const canvas = document.getElementById('canvas');
+        const isCanvasVisible = canvas.classList.contains('visible');
+        
+        if (isCanvasVisible) {
             const confirmed = confirm('Are you sure you want to clear the entire canvas?');
             if (confirmed) {
                 this.shapes = [];
@@ -1129,7 +1154,6 @@ class ImageEditor {
                 
                 // キャンバスを非表示にしてDrop zoneを再表示
                 const dropZone = document.getElementById('dropZone');
-                const canvas = document.getElementById('canvas');
                 dropZone.classList.remove('hidden');
                 canvas.classList.remove('visible');
             }
@@ -1551,6 +1575,54 @@ class ImageEditor {
         } else {
             strokeDisplay.textContent = this.strokeWidth;
         }
+    }
+    
+    showCanvasSizeControls() {
+        const initialActions = document.querySelector('.initial-actions');
+        const canvasSizeControls = document.getElementById('canvasSizeControls');
+        
+        initialActions.style.display = 'none';
+        canvasSizeControls.style.display = 'block';
+    }
+    
+    hideCanvasSizeControls() {
+        const initialActions = document.querySelector('.initial-actions');
+        const canvasSizeControls = document.getElementById('canvasSizeControls');
+        
+        initialActions.style.display = 'flex';
+        canvasSizeControls.style.display = 'none';
+    }
+    
+    createNewCanvas() {
+        const widthInput = document.getElementById('canvasWidth');
+        const heightInput = document.getElementById('canvasHeight');
+        
+        const width = parseInt(widthInput.value);
+        const height = parseInt(heightInput.value);
+        
+        if (width < 100 || width > 2000 || height < 100 || height > 2000) {
+            alert('Canvas size must be between 100x100 and 2000x2000 pixels.');
+            return;
+        }
+        
+        this.createCanvasWithSize(width, height);
+    }
+    
+    createCanvasWithSize(width, height) {
+        this.canvas.width = width;
+        this.canvas.height = height;
+        this.backgroundImage = null;
+        this.shapes = [];
+        this.selectedShape = null;
+        
+        const dropZone = document.getElementById('dropZone');
+        const canvas = document.getElementById('canvas');
+        dropZone.classList.add('hidden');
+        canvas.classList.add('visible');
+        
+        this.redraw();
+        this.updateUIForSelectedShape();
+        this.hideCanvasSizeControls();
     }
 }
 

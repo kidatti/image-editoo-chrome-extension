@@ -424,3 +424,136 @@ body {
     font-weight: 500;
 }
 
+.canvas-size-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 24px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.canvas-size-controls h3 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    color: #333;
+    font-weight: 600;
+}
+
+.preset-sizes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.preset-size-btn {
+    padding: 12px 16px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background-color: #f8f9fa;
+    color: #333;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.preset-size-btn:hover {
+    background-color: #3498db;
+    border-color: #3498db;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
+}
+
+.custom-size-label {
+    font-size: 14px;
+    color: #666;
+    font-weight: 500;
+    margin: 8px 0 4px 0;
+    width: 100%;
+    text-align: left;
+}
+
+.size-input-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+}
+
+.size-input-group label {
+    font-size: 14px;
+    color: #333;
+    font-weight: 500;
+    min-width: 50px;
+}
+
+.size-input-group input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    text-align: center;
+    background-color: #fafafa;
+    transition: all 0.2s;
+}
+
+.size-input-group input:focus {
+    outline: none;
+    border-color: #3498db;
+    background-color: white;
+    box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.1);
+}
+
+.size-buttons {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+}
+
+.size-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+.size-btn.primary {
+    background-color: #3498db;
+    color: white;
+    border-color: #3498db;
+}
+
+.size-btn.primary:hover {
+    background-color: #2980b9;
+    border-color: #2980b9;
+}
+
+.size-btn.secondary {
+    background-color: white;
+    color: #666;
+}
+
+.size-btn.secondary:hover {
+    background-color: #f8f9fa;
+    border-color: #bbb;
+}
+

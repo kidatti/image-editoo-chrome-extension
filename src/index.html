@@ -112,6 +112,38 @@
                         </button>
                         <span>Clipboard</span>
                     </div>
+                    <div class="action-item">
+                        <button class="action-button" id="createCanvasBtn">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" stroke="currentColor" stroke-width="2" fill="none"/>
+                                <line x1="12" y1="8" x2="12" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                <line x1="8" y1="12" x2="16" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                        <span>New Canvas</span>
+                    </div>
+                </div>
+                <div class="canvas-size-controls" id="canvasSizeControls" style="display: none;">
+                    <h3>Create New Canvas</h3>
+                    <div class="preset-sizes">
+                        <button class="preset-size-btn" data-width="800" data-height="600">800 × 600</button>
+                        <button class="preset-size-btn" data-width="1024" data-height="768">1024 × 768</button>
+                        <button class="preset-size-btn" data-width="1200" data-height="800">1200 × 800</button>
+                        <button class="preset-size-btn" data-width="1920" data-height="1080">1920 × 1080</button>
+                    </div>
+                    <div class="custom-size-label">Custom Size:</div>
+                    <div class="size-input-group">
+                        <label for="canvasWidth">Width:</label>
+                        <input type="number" id="canvasWidth" min="100" max="2000" value="800" step="10">
+                    </div>
+                    <div class="size-input-group">
+                        <label for="canvasHeight">Height:</label>
+                        <input type="number" id="canvasHeight" min="100" max="2000" value="600" step="10">
+                    </div>
+                    <div class="size-buttons">
+                        <button id="createCanvasConfirm" class="size-btn primary">Create</button>
+                        <button id="createCanvasCancel" class="size-btn secondary">Cancel</button>
+                    </div>
                 </div>
             </div>
         </div>
