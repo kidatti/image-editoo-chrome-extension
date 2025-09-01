@@ -6,6 +6,7 @@ class ImageEditor {
         this.isDrawing = false;
         this.startX = 0;
         this.startY = 0;
+        // 初期値は一時的に設定（loadSettingsで上書きされる）
         this.currentColor = '#ff0000';
         this.strokeWidth = 4;
         this.fontSize = 16;
@@ -21,9 +22,16 @@ class ImageEditor {
         this.resizeHandle = null;
         this.resizeHandles = [];
         
+        this.isLoadingSettings = false;
+        
         this.setupCanvas();
         this.setupEventListeners();
         this.setupToolbar();
+        
+        // 設定読み込みは最後に実行（DOM要素が確実に利用可能になってから）
+        setTimeout(() => {
+            this.loadSettings();
+        }, 500);
     }
     
     setupCanvas() {
@@ -61,8 +69,8 @@ class ImageEditor {
         
         this.canvas.addEventListener('mousedown', (e) => this.startDrawing(e));
         this.canvas.addEventListener('mousemove', (e) => this.draw(e));
-        this.canvas.addEventListener('mouseup', () => this.stopDrawing());
-        this.canvas.addEventListener('mouseout', () => this.stopDrawing());
+        this.canvas.addEventListener('mouseup', (e) => this.stopDrawing(e));
+        this.canvas.addEventListener('mouseout', (e) => this.stopDrawing(e));
         this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
         this.canvas.addEventListener('dblclick', (e) => this.handleCanvasDoubleClick(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
@@ -79,6 +87,7 @@ class ImageEditor {
     setupToolbar() {
         const toolButtons = document.querySelectorAll('[data-tool]');
         const colorPicker = document.getElementById('colorPicker');
+        const copyBtn = document.getElementById('copyBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const deleteBtn = document.getElementById('deleteBtn');
         const colorButton = document.getElementById('colorButton');
@@ -94,6 +103,7 @@ class ImageEditor {
                 toolButtons.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.currentTool = btn.dataset.tool;
+                console.log('Tool selected:', this.currentTool);
                 this.canvas.style.cursor = 'crosshair';
                 
                 // 選択を解除（selectツールが削除されたため、常に解除）
@@ -128,10 +138,23 @@ class ImageEditor {
         // ポップアップ内のプリセットカラーとストロークオプション
         this.setupPopupEventListeners();
         
-        // 初期値設定
-        this.setStrokeWidth(4); // デフォルトを4pxに設定
+        // 初期値設定（保存された設定がない場合のみ設定）
+        // this.setStrokeWidth(4); // loadSettings()で上書きされるため削除
         
         // clearBtn要素が削除されているため、この部分を削除
+        
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await this.copyToClipboard();
+                // 成功時の視覚フィードバック（ボタンの一時的な変更）
+                copyBtn.style.backgroundColor = '#4CAF50';
+                setTimeout(() => {
+                    copyBtn.style.backgroundColor = '';
+                }, 1000);
+            } catch (error) {
+                alert('Failed to copy image to clipboard. This feature requires HTTPS or localhost.');
+            }
+        });
         
         downloadBtn.addEventListener('click', () => this.downloadImage());
         
@@ -191,6 +214,9 @@ class ImageEditor {
         // Drop zone buttons
         const imageInputDrop = document.getElementById('imageInputDrop');
         const pasteBtnDrop = document.getElementById('pasteBtnDrop');
+        const createCanvasBtn = document.getElementById('createCanvasBtn');
+        const createCanvasConfirm = document.getElementById('createCanvasConfirm');
+        const createCanvasCancel = document.getElementById('createCanvasCancel');
         
         if (imageInputDrop) {
             imageInputDrop.addEventListener('change', (e) => this.handleImageUpload(e));
@@ -206,12 +232,28 @@ class ImageEditor {
             });
         }
         
+        if (createCanvasBtn) {
+            createCanvasBtn.addEventListener('click', () => this.showCanvasSizeControls());
+        }
         
-        textInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                textOkBtn.click();
-            }
+        if (createCanvasConfirm) {
+            createCanvasConfirm.addEventListener('click', () => this.createNewCanvas());
+        }
+        
+        if (createCanvasCancel) {
+            createCanvasCancel.addEventListener('click', () => this.hideCanvasSizeControls());
+        }
+        
+        // Preset size buttons
+        const presetSizeBtns = document.querySelectorAll('.preset-size-btn');
+        presetSizeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const width = parseInt(btn.dataset.width);
+                const height = parseInt(btn.dataset.height);
+                this.createCanvasWithSize(width, height);
+            });
         });
+        
     }
     
     handleImageUpload(e) {
@@ -358,7 +400,7 @@ class ImageEditor {
         this.drawPreview(this.startX, this.startY, pos.x, pos.y);
     }
     
-    stopDrawing() {
+    stopDrawing(e) {
         if (this.isResizing) {
             this.isResizing = false;
             this.resizeHandle = null;
@@ -375,7 +417,14 @@ class ImageEditor {
         if (!this.isDrawing) return;
         
         this.isDrawing = false;
-        const currentPos = this.getMousePos(event);
+        // イベントオブジェクトがない場合は最後の座標を使用
+        let currentPos;
+        if (e) {
+            currentPos = this.getMousePos(e);
+        } else {
+            // イベントがない場合は描画開始点と同じ点を使用（キャンセル扱い）
+            currentPos = { x: this.startX, y: this.startY };
+        }
         
         if (Math.abs(currentPos.x - this.startX) > 5 || Math.abs(currentPos.y - this.startY) > 5) {
             const shape = {
@@ -391,8 +440,10 @@ class ImageEditor {
             // モザイクの場合はブロックサイズを保存
             if (this.currentTool === 'mosaic') {
                 shape.blockSize = this.strokeWidth * 2;
+                console.log('Mosaic shape created:', shape);
             }
             
+            console.log('Shape added:', shape);
             this.shapes.push(shape);
             this.redraw();
             this.updateUIForSelectedShape();
@@ -585,7 +636,7 @@ class ImageEditor {
                 this.drawEllipse(startX, startY, endX, endY);
                 break;
             case 'arrow':
-                this.drawArrow(startX, startY, endX, endY);
+                this.drawArrowPreview(startX, startY, endX, endY);
                 break;
             case 'mosaic':
                 this.drawMosaicPreview(startX, startY, endX, endY);
@@ -630,37 +681,147 @@ class ImageEditor {
     drawArrow(startX, startY, endX, endY) {
         const angle = Math.atan2(endY - startY, endX - startX);
         const length = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
-        const arrowLength = Math.min(length * 0.15, 15);
-        const arrowWidth = this.strokeWidth * 2;
         
-        // 矢印の先端から少し手前まで線を引く
-        const lineEndX = endX - arrowLength * Math.cos(angle);
-        const lineEndY = endY - arrowLength * Math.sin(angle);
+        if (length < 10) return; // 短すぎる場合は描画しない
         
-        // 矢印の軸線を描画
-        this.ctx.beginPath();
-        this.ctx.moveTo(startX, startY);
-        this.ctx.lineTo(lineEndX, lineEndY);
-        this.ctx.stroke();
+        // 矢印の基本サイズ
+        const baseWidth = this.strokeWidth * 0.6;
+        const maxWidth = this.strokeWidth * 2.8;
+        const headLength = Math.min(length * 0.25, 30);
+        const headWidth = Math.max(this.strokeWidth * 5, 20);
         
-        // 三角形の矢印先端を描画
-        const arrowPoint1X = endX - arrowLength * Math.cos(angle - Math.PI / 6);
-        const arrowPoint1Y = endY - arrowLength * Math.sin(angle - Math.PI / 6);
-        const arrowPoint2X = endX - arrowLength * Math.cos(angle + Math.PI / 6);
-        const arrowPoint2Y = endY - arrowLength * Math.sin(angle + Math.PI / 6);
-        
-        this.ctx.beginPath();
-        this.ctx.moveTo(endX, endY);
-        this.ctx.lineTo(arrowPoint1X, arrowPoint1Y);
-        this.ctx.lineTo(arrowPoint2X, arrowPoint2Y);
-        this.ctx.closePath();
-        
-        // 矢印先端を塗りつぶし
+        this.ctx.save();
         this.ctx.fillStyle = this.ctx.strokeStyle;
-        this.ctx.fill();
         
-        // 矢印先端の輪郭も描画
-        this.ctx.stroke();
+        // 滑らかな矢印の本体を描画
+        this.drawTaperedArrowBody(startX, startY, endX, endY, baseWidth, maxWidth, headLength);
+        
+        // 矢印の先端を描画
+        this.drawCurvedArrowHead(endX, endY, angle, headLength, headWidth);
+        
+        this.ctx.restore();
+    }
+    
+    drawTaperedArrowBody(startX, startY, endX, endY, baseWidth, maxWidth, headLength) {
+        const angle = Math.atan2(endY - startY, endX - startX);
+        const length = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+        const bodyLength = length - headLength;
+        
+        if (bodyLength <= 0) return;
+        
+        // 矢印の本体の終点（先端の基点と一致）
+        const bodyEndX = endX - headLength * Math.cos(angle);
+        const bodyEndY = endY - headLength * Math.sin(angle);
+        
+        // 垂直方向のベクトル
+        const perpX = -Math.sin(angle);
+        const perpY = Math.cos(angle);
+        
+        this.ctx.beginPath();
+        
+        // 本体の形状を作成（徐々に太くなる）
+        const segments = 20;
+        const points = [];
+        
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            const x = startX + t * (bodyEndX - startX);
+            const y = startY + t * (bodyEndY - startY);
+            
+            // 幅を徐々に大きくする（適度な変化）
+            const widthProgress = this.easeInCubic(t);
+            const currentWidth = baseWidth + (maxWidth - baseWidth) * widthProgress;
+            
+            const halfWidth = currentWidth / 2;
+            
+            // 上下の点を計算
+            const topX = x + perpX * halfWidth;
+            const topY = y + perpY * halfWidth;
+            const bottomX = x - perpX * halfWidth;
+            const bottomY = y - perpY * halfWidth;
+            
+            points.push({ top: { x: topX, y: topY }, bottom: { x: bottomX, y: bottomY } });
+        }
+        
+        // 上側の曲線を描画
+        this.ctx.moveTo(points[0].top.x, points[0].top.y);
+        for (let i = 1; i < points.length; i++) {
+            const cp1x = points[i-1].top.x + (points[i].top.x - points[i-1].top.x) * 0.5;
+            const cp1y = points[i-1].top.y + (points[i].top.y - points[i-1].top.y) * 0.5;
+            this.ctx.quadraticCurveTo(cp1x, cp1y, points[i].top.x, points[i].top.y);
+        }
+        
+        // 下側の曲線を描画（逆順）
+        for (let i = points.length - 1; i >= 0; i--) {
+            if (i === points.length - 1) {
+                this.ctx.lineTo(points[i].bottom.x, points[i].bottom.y);
+            } else {
+                const cp1x = points[i+1].bottom.x + (points[i].bottom.x - points[i+1].bottom.x) * 0.5;
+                const cp1y = points[i+1].bottom.y + (points[i].bottom.y - points[i+1].bottom.y) * 0.5;
+                this.ctx.quadraticCurveTo(cp1x, cp1y, points[i].bottom.x, points[i].bottom.y);
+            }
+        }
+        
+        this.ctx.closePath();
+        this.ctx.fill();
+    }
+    
+    drawCurvedArrowHead(endX, endY, angle, headLength, headWidth) {
+        // 垂直方向のベクトル
+        const perpX = -Math.sin(angle);
+        const perpY = Math.cos(angle);
+        
+        // 矢印先端の基点（本体の終端と一致させる）
+        const baseX = endX - headLength * Math.cos(angle);
+        const baseY = endY - headLength * Math.sin(angle);
+        
+        // シンプルな三角形の矢印先端
+        this.ctx.beginPath();
+        this.ctx.moveTo(endX, endY); // 先端
+        
+        // 左の角
+        const leftX = baseX + perpX * headWidth / 2;
+        const leftY = baseY + perpY * headWidth / 2;
+        this.ctx.lineTo(leftX, leftY);
+        
+        // 右の角
+        const rightX = baseX - perpX * headWidth / 2;
+        const rightY = baseY - perpY * headWidth / 2;
+        this.ctx.lineTo(rightX, rightY);
+        
+        // 先端に戻る
+        this.ctx.lineTo(endX, endY);
+        
+        this.ctx.closePath();
+        this.ctx.fill();
+    }
+    
+    // イージング関数：適度な変化（3次関数）
+    easeInCubic(t) {
+        return t * t * t;
+    }
+    
+    // イージング関数：遅い変化（4次関数）
+    easeInQuart(t) {
+        return t * t * t * t;
+    }
+    
+    // イージング関数：より滑らかな変化
+    easeInOutQuad(t) {
+        return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    }
+    
+    // イージング関数：徐々に加速
+    easeOutQuad(t) {
+        return 1 - (1 - t) * (1 - t);
+    }
+    
+    drawArrowPreview(startX, startY, endX, endY) {
+        // プレビュー時は少し透明にして視認性を向上
+        this.ctx.save();
+        this.ctx.globalAlpha = 0.7;
+        this.drawArrow(startX, startY, endX, endY);
+        this.ctx.restore();
     }
     
     drawMosaicPreview(startX, startY, endX, endY) {
@@ -672,20 +833,35 @@ class ImageEditor {
     }
     
     drawMosaic(startX, startY, endX, endY, blockSize = null) {
-        if (!this.backgroundImage) return;
+        console.log('drawMosaic called:', { startX, startY, endX, endY, blockSize });
         
-        const x = Math.min(startX, endX);
-        const y = Math.min(startY, endY);
-        const width = Math.abs(endX - startX);
-        const height = Math.abs(endY - startY);
+        // キャンバスに何も描画されていない場合（背景画像も図形もない場合）はモザイクを適用できない
+        if (!this.backgroundImage && this.shapes.length === 0) {
+            console.log('No content to apply mosaic to');
+            return;
+        }
+        
+        // 座標を正規化
+        const x = Math.max(0, Math.min(startX, endX));
+        const y = Math.max(0, Math.min(startY, endY));
+        const endXClamped = Math.min(this.canvas.width, Math.max(startX, endX));
+        const endYClamped = Math.min(this.canvas.height, Math.max(startY, endY));
+        const width = endXClamped - x;
+        const height = endYClamped - y;
         
         if (width <= 0 || height <= 0) return;
         
         // モザイクのブロックサイズ（線の太さ設定を使用）
-        const mosaicBlockSize = blockSize || (this.strokeWidth * 2);
+        const mosaicBlockSize = Math.max(2, blockSize || (this.strokeWidth * 2));
         
-        // 元画像からピクセルデータを取得
-        const imageData = this.ctx.getImageData(x, y, width, height);
+        // 現在のキャンバスの状態からピクセルデータを取得
+        let imageData;
+        try {
+            imageData = this.ctx.getImageData(x, y, width, height);
+        } catch (error) {
+            console.error('Failed to get image data for mosaic:', error);
+            return;
+        }
         const data = imageData.data;
         
         // モザイク処理
@@ -698,20 +874,24 @@ class ImageEditor {
                 const blockWidth = Math.min(mosaicBlockSize, width - blockX);
                 const blockHeight = Math.min(mosaicBlockSize, height - blockY);
                 
+                // ブロック内のピクセルを走査
                 for (let py = blockY; py < blockY + blockHeight; py++) {
                     for (let px = blockX; px < blockX + blockWidth; px++) {
-                        if (px < width && py < height) {
+                        if (px >= 0 && px < width && py >= 0 && py < height) {
                             const index = (py * width + px) * 4;
-                            r += data[index];
-                            g += data[index + 1];
-                            b += data[index + 2];
-                            a += data[index + 3];
-                            pixelCount++;
+                            if (index < data.length) {
+                                r += data[index];
+                                g += data[index + 1];
+                                b += data[index + 2];
+                                a += data[index + 3];
+                                pixelCount++;
+                            }
                         }
                     }
                 }
                 
                 if (pixelCount > 0) {
+                    // 平均色を計算
                     r = Math.floor(r / pixelCount);
                     g = Math.floor(g / pixelCount);
                     b = Math.floor(b / pixelCount);
@@ -963,6 +1143,7 @@ class ImageEditor {
     
     updateUIForSelectedShape() {
         const colorPicker = document.getElementById('colorPicker');
+        const copyBtn = document.getElementById('copyBtn');
         const deleteBtn = document.getElementById('deleteBtn');
         const colorButton = document.getElementById('colorButton');
         const strokeDisplay = document.getElementById('strokeDisplay');
@@ -1001,9 +1182,16 @@ class ImageEditor {
             
             deleteBtn.disabled = false;
         } else {
-            // キャンバスに何かあれば削除ボタンを有効にする
-            deleteBtn.disabled = !(this.shapes.length > 0 || this.backgroundImage);
+            // キャンバスが表示されていれば削除ボタンを有効にする
+            const canvas = document.getElementById('canvas');
+            const isCanvasVisible = canvas.classList.contains('visible');
+            deleteBtn.disabled = !isCanvasVisible;
         }
+        
+        // コピーボタンはキャンバスが表示されているかどうかで制御
+        const canvas = document.getElementById('canvas');
+        const isCanvasVisible = canvas.classList.contains('visible');
+        copyBtn.disabled = !isCanvasVisible;
     }
     
     updateActivePresetColor(color) {
@@ -1022,6 +1210,29 @@ class ImageEditor {
         link.download = 'edited-image.png';
         link.href = this.canvas.toDataURL();
         link.click();
+    }
+
+    async copyToClipboard() {
+        try {
+            if (!navigator.clipboard || !navigator.clipboard.write) {
+                throw new Error('Clipboard API not supported');
+            }
+
+            // キャンバスを blob に変換
+            const canvas = this.canvas;
+            return new Promise(resolve => {
+                canvas.toBlob(async (blob) => {
+                    if (blob) {
+                        const item = new ClipboardItem({ [blob.type]: blob });
+                        await navigator.clipboard.write([item]);
+                        resolve();
+                    }
+                }, 'image/png');
+            });
+        } catch (error) {
+            console.error('Failed to copy to clipboard:', error);
+            throw error;
+        }
     }
     
     cancelCurrentAction() {
@@ -1118,7 +1329,11 @@ class ImageEditor {
     }
     
     clearCanvas() {
-        if (this.shapes.length > 0 || this.backgroundImage) {
+        // キャンバスが表示されている場合は削除可能
+        const canvas = document.getElementById('canvas');
+        const isCanvasVisible = canvas.classList.contains('visible');
+        
+        if (isCanvasVisible) {
             const confirmed = confirm('Are you sure you want to clear the entire canvas?');
             if (confirmed) {
                 this.shapes = [];
@@ -1129,7 +1344,6 @@ class ImageEditor {
                 
                 // キャンバスを非表示にしてDrop zoneを再表示
                 const dropZone = document.getElementById('dropZone');
-                const canvas = document.getElementById('canvas');
                 dropZone.classList.remove('hidden');
                 canvas.classList.remove('visible');
             }
@@ -1367,6 +1581,7 @@ class ImageEditor {
         }
         
         this.updateActivePresetColor(color);
+        this.saveSettings();
     }
     
     setStrokeWidth(width) {
@@ -1387,6 +1602,7 @@ class ImageEditor {
         }
         
         this.updateActiveStrokeOption(width);
+        this.saveSettings();
     }
     
     updateActiveStrokeOption(width) {
@@ -1540,6 +1756,8 @@ class ImageEditor {
         // ボタンの表示を更新
         const strokeDisplay = document.getElementById('strokeDisplay');
         strokeDisplay.textContent = fontSize;
+        
+        this.saveSettings();
     }
     
     updateStrokeDisplayForTool() {
@@ -1550,6 +1768,136 @@ class ImageEditor {
             strokeDisplay.textContent = this.strokeWidth * 2; // モザイクブロックサイズ表示
         } else {
             strokeDisplay.textContent = this.strokeWidth;
+        }
+    }
+    
+    showCanvasSizeControls() {
+        const initialActions = document.querySelector('.initial-actions');
+        const canvasSizeControls = document.getElementById('canvasSizeControls');
+        
+        initialActions.style.display = 'none';
+        canvasSizeControls.style.display = 'block';
+    }
+    
+    hideCanvasSizeControls() {
+        const initialActions = document.querySelector('.initial-actions');
+        const canvasSizeControls = document.getElementById('canvasSizeControls');
+        
+        initialActions.style.display = 'flex';
+        canvasSizeControls.style.display = 'none';
+    }
+    
+    createNewCanvas() {
+        const widthInput = document.getElementById('canvasWidth');
+        const heightInput = document.getElementById('canvasHeight');
+        
+        const width = parseInt(widthInput.value);
+        const height = parseInt(heightInput.value);
+        
+        if (width < 100 || width > 2000 || height < 100 || height > 2000) {
+            alert('Canvas size must be between 100x100 and 2000x2000 pixels.');
+            return;
+        }
+        
+        this.createCanvasWithSize(width, height);
+    }
+    
+    createCanvasWithSize(width, height) {
+        this.canvas.width = width;
+        this.canvas.height = height;
+        this.backgroundImage = null;
+        this.shapes = [];
+        this.selectedShape = null;
+        
+        const dropZone = document.getElementById('dropZone');
+        const canvas = document.getElementById('canvas');
+        dropZone.classList.add('hidden');
+        canvas.classList.add('visible');
+        
+        this.redraw();
+        this.updateUIForSelectedShape();
+        this.hideCanvasSizeControls();
+    }
+    
+    // 設定の保存
+    saveSettings() {
+        if (this.isLoadingSettings) {
+            return;
+        }
+        
+        const settings = {
+            currentColor: this.currentColor,
+            strokeWidth: this.strokeWidth,
+            fontSize: this.fontSize
+        };
+        localStorage.setItem('imageEditor_settings', JSON.stringify(settings));
+    }
+    
+    // 設定の読み込み
+    loadSettings() {
+        this.isLoadingSettings = true;
+        
+        try {
+            const savedSettings = localStorage.getItem('imageEditor_settings');
+            if (savedSettings) {
+                const settings = JSON.parse(savedSettings);
+                
+                // 色設定を復元
+                if (settings.currentColor) {
+                    this.currentColor = settings.currentColor;
+                    const colorButton = document.getElementById('colorButton');
+                    const colorPicker = document.getElementById('colorPicker');
+                    const customColorPicker = document.getElementById('customColorPicker');
+                    
+                    if (colorButton) colorButton.style.backgroundColor = settings.currentColor;
+                    if (colorPicker) colorPicker.value = settings.currentColor;
+                    if (customColorPicker) customColorPicker.value = settings.currentColor;
+                    
+                    this.updateActivePresetColor(settings.currentColor);
+                }
+                
+                // 線の太さを復元
+                if (settings.strokeWidth) {
+                    this.strokeWidth = settings.strokeWidth;
+                    const strokeDisplay = document.getElementById('strokeDisplay');
+                    if (strokeDisplay) strokeDisplay.textContent = settings.strokeWidth;
+                    this.updateActiveStrokeOption(settings.strokeWidth);
+                }
+                
+                // フォントサイズを復元
+                if (settings.fontSize) {
+                    this.fontSize = settings.fontSize;
+                    this.updateActiveFontSizeOption(settings.fontSize);
+                }
+                
+                // UIを更新
+                this.updateStrokeDisplayForTool();
+            } else {
+                // 保存された設定がない場合のデフォルト値を設定
+                this.currentColor = '#ff0000';
+                this.strokeWidth = 4;
+                this.fontSize = 16;
+                
+                // UIにデフォルト値を反映
+                const colorButton = document.getElementById('colorButton');
+                const colorPicker = document.getElementById('colorPicker');
+                const customColorPicker = document.getElementById('customColorPicker');
+                const strokeDisplay = document.getElementById('strokeDisplay');
+                
+                if (colorButton) colorButton.style.backgroundColor = this.currentColor;
+                if (colorPicker) colorPicker.value = this.currentColor;
+                if (customColorPicker) customColorPicker.value = this.currentColor;
+                if (strokeDisplay) strokeDisplay.textContent = this.strokeWidth;
+                
+                this.updateActivePresetColor(this.currentColor);
+                this.updateActiveStrokeOption(this.strokeWidth);
+                this.updateActiveFontSizeOption(this.fontSize);
+                this.updateStrokeDisplayForTool();
+            }
+        } catch (error) {
+            console.error('設定の読み込みに失敗しました:', error);
+        } finally {
+            this.isLoadingSettings = false;
         }
     }
 }

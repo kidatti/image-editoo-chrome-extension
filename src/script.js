@@ -6,6 +6,7 @@ class ImageEditor {
         this.isDrawing = false;
         this.startX = 0;
         this.startY = 0;
+        // 初期値は一時的に設定（loadSettingsで上書きされる）
         this.currentColor = '#ff0000';
         this.strokeWidth = 4;
         this.fontSize = 16;
@@ -21,9 +22,16 @@ class ImageEditor {
         this.resizeHandle = null;
         this.resizeHandles = [];
         
+        this.isLoadingSettings = false;
+        
         this.setupCanvas();
         this.setupEventListeners();
         this.setupToolbar();
+        
+        // 設定読み込みは最後に実行（DOM要素が確実に利用可能になってから）
+        setTimeout(() => {
+            this.loadSettings();
+        }, 500);
     }
     
     setupCanvas() {
@@ -61,8 +69,8 @@ class ImageEditor {
         
         this.canvas.addEventListener('mousedown', (e) => this.startDrawing(e));
         this.canvas.addEventListener('mousemove', (e) => this.draw(e));
-        this.canvas.addEventListener('mouseup', () => this.stopDrawing());
-        this.canvas.addEventListener('mouseout', () => this.stopDrawing());
+        this.canvas.addEventListener('mouseup', (e) => this.stopDrawing(e));
+        this.canvas.addEventListener('mouseout', (e) => this.stopDrawing(e));
         this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
         this.canvas.addEventListener('dblclick', (e) => this.handleCanvasDoubleClick(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
@@ -79,6 +87,7 @@ class ImageEditor {
     setupToolbar() {
         const toolButtons = document.querySelectorAll('[data-tool]');
         const colorPicker = document.getElementById('colorPicker');
+        const copyBtn = document.getElementById('copyBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const deleteBtn = document.getElementById('deleteBtn');
         const colorButton = document.getElementById('colorButton');
@@ -94,6 +103,7 @@ class ImageEditor {
                 toolButtons.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.currentTool = btn.dataset.tool;
+                console.log('Tool selected:', this.currentTool);
                 this.canvas.style.cursor = 'crosshair';
                 
                 // 選択を解除（selectツールが削除されたため、常に解除）
@@ -128,10 +138,23 @@ class ImageEditor {
         // ポップアップ内のプリセットカラーとストロークオプション
         this.setupPopupEventListeners();
         
-        // 初期値設定
-        this.setStrokeWidth(4); // デフォルトを4pxに設定
+        // 初期値設定（保存された設定がない場合のみ設定）
+        // this.setStrokeWidth(4); // loadSettings()で上書きされるため削除
         
         // clearBtn要素が削除されているため、この部分を削除
+        
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await this.copyToClipboard();
+                // 成功時の視覚フィードバック（ボタンの一時的な変更）
+                copyBtn.style.backgroundColor = '#4CAF50';
+                setTimeout(() => {
+                    copyBtn.style.backgroundColor = '';
+                }, 1000);
+            } catch (error) {
+                alert('Failed to copy image to clipboard. This feature requires HTTPS or localhost.');
+            }
+        });
         
         downloadBtn.addEventListener('click', () => this.downloadImage());
         
@@ -377,7 +400,7 @@ class ImageEditor {
         this.drawPreview(this.startX, this.startY, pos.x, pos.y);
     }
     
-    stopDrawing() {
+    stopDrawing(e) {
         if (this.isResizing) {
             this.isResizing = false;
             this.resizeHandle = null;
@@ -394,7 +417,14 @@ class ImageEditor {
         if (!this.isDrawing) return;
         
         this.isDrawing = false;
-        const currentPos = this.getMousePos(event);
+        // イベントオブジェクトがない場合は最後の座標を使用
+        let currentPos;
+        if (e) {
+            currentPos = this.getMousePos(e);
+        } else {
+            // イベントがない場合は描画開始点と同じ点を使用（キャンセル扱い）
+            currentPos = { x: this.startX, y: this.startY };
+        }
         
         if (Math.abs(currentPos.x - this.startX) > 5 || Math.abs(currentPos.y - this.startY) > 5) {
             const shape = {
@@ -410,8 +440,10 @@ class ImageEditor {
             // モザイクの場合はブロックサイズを保存
             if (this.currentTool === 'mosaic') {
                 shape.blockSize = this.strokeWidth * 2;
+                console.log('Mosaic shape created:', shape);
             }
             
+            console.log('Shape added:', shape);
             this.shapes.push(shape);
             this.redraw();
             this.updateUIForSelectedShape();
@@ -801,20 +833,35 @@ class ImageEditor {
     }
     
     drawMosaic(startX, startY, endX, endY, blockSize = null) {
-        if (!this.backgroundImage) return;
+        console.log('drawMosaic called:', { startX, startY, endX, endY, blockSize });
         
-        const x = Math.min(startX, endX);
-        const y = Math.min(startY, endY);
-        const width = Math.abs(endX - startX);
-        const height = Math.abs(endY - startY);
+        // キャンバスに何も描画されていない場合（背景画像も図形もない場合）はモザイクを適用できない
+        if (!this.backgroundImage && this.shapes.length === 0) {
+            console.log('No content to apply mosaic to');
+            return;
+        }
+        
+        // 座標を正規化
+        const x = Math.max(0, Math.min(startX, endX));
+        const y = Math.max(0, Math.min(startY, endY));
+        const endXClamped = Math.min(this.canvas.width, Math.max(startX, endX));
+        const endYClamped = Math.min(this.canvas.height, Math.max(startY, endY));
+        const width = endXClamped - x;
+        const height = endYClamped - y;
         
         if (width <= 0 || height <= 0) return;
         
         // モザイクのブロックサイズ（線の太さ設定を使用）
-        const mosaicBlockSize = blockSize || (this.strokeWidth * 2);
+        const mosaicBlockSize = Math.max(2, blockSize || (this.strokeWidth * 2));
         
-        // 元画像からピクセルデータを取得
-        const imageData = this.ctx.getImageData(x, y, width, height);
+        // 現在のキャンバスの状態からピクセルデータを取得
+        let imageData;
+        try {
+            imageData = this.ctx.getImageData(x, y, width, height);
+        } catch (error) {
+            console.error('Failed to get image data for mosaic:', error);
+            return;
+        }
         const data = imageData.data;
         
         // モザイク処理
@@ -827,20 +874,24 @@ class ImageEditor {
                 const blockWidth = Math.min(mosaicBlockSize, width - blockX);
                 const blockHeight = Math.min(mosaicBlockSize, height - blockY);
                 
+                // ブロック内のピクセルを走査
                 for (let py = blockY; py < blockY + blockHeight; py++) {
                     for (let px = blockX; px < blockX + blockWidth; px++) {
-                        if (px < width && py < height) {
+                        if (px >= 0 && px < width && py >= 0 && py < height) {
                             const index = (py * width + px) * 4;
-                            r += data[index];
-                            g += data[index + 1];
-                            b += data[index + 2];
-                            a += data[index + 3];
-                            pixelCount++;
+                            if (index < data.length) {
+                                r += data[index];
+                                g += data[index + 1];
+                                b += data[index + 2];
+                                a += data[index + 3];
+                                pixelCount++;
+                            }
                         }
                     }
                 }
                 
                 if (pixelCount > 0) {
+                    // 平均色を計算
                     r = Math.floor(r / pixelCount);
                     g = Math.floor(g / pixelCount);
                     b = Math.floor(b / pixelCount);
@@ -1092,6 +1143,7 @@ class ImageEditor {
     
     updateUIForSelectedShape() {
         const colorPicker = document.getElementById('colorPicker');
+        const copyBtn = document.getElementById('copyBtn');
         const deleteBtn = document.getElementById('deleteBtn');
         const colorButton = document.getElementById('colorButton');
         const strokeDisplay = document.getElementById('strokeDisplay');
@@ -1135,6 +1187,11 @@ class ImageEditor {
             const isCanvasVisible = canvas.classList.contains('visible');
             deleteBtn.disabled = !isCanvasVisible;
         }
+        
+        // コピーボタンはキャンバスが表示されているかどうかで制御
+        const canvas = document.getElementById('canvas');
+        const isCanvasVisible = canvas.classList.contains('visible');
+        copyBtn.disabled = !isCanvasVisible;
     }
     
     updateActivePresetColor(color) {
@@ -1153,6 +1210,29 @@ class ImageEditor {
         link.download = 'edited-image.png';
         link.href = this.canvas.toDataURL();
         link.click();
+    }
+
+    async copyToClipboard() {
+        try {
+            if (!navigator.clipboard || !navigator.clipboard.write) {
+                throw new Error('Clipboard API not supported');
+            }
+
+            // キャンバスを blob に変換
+            const canvas = this.canvas;
+            return new Promise(resolve => {
+                canvas.toBlob(async (blob) => {
+                    if (blob) {
+                        const item = new ClipboardItem({ [blob.type]: blob });
+                        await navigator.clipboard.write([item]);
+                        resolve();
+                    }
+                }, 'image/png');
+            });
+        } catch (error) {
+            console.error('Failed to copy to clipboard:', error);
+            throw error;
+        }
     }
     
     cancelCurrentAction() {
@@ -1501,6 +1581,7 @@ class ImageEditor {
         }
         
         this.updateActivePresetColor(color);
+        this.saveSettings();
     }
     
     setStrokeWidth(width) {
@@ -1521,6 +1602,7 @@ class ImageEditor {
         }
         
         this.updateActiveStrokeOption(width);
+        this.saveSettings();
     }
     
     updateActiveStrokeOption(width) {
@@ -1674,6 +1756,8 @@ class ImageEditor {
         // ボタンの表示を更新
         const strokeDisplay = document.getElementById('strokeDisplay');
         strokeDisplay.textContent = fontSize;
+        
+        this.saveSettings();
     }
     
     updateStrokeDisplayForTool() {
@@ -1733,6 +1817,88 @@ class ImageEditor {
         this.redraw();
         this.updateUIForSelectedShape();
         this.hideCanvasSizeControls();
+    }
+    
+    // 設定の保存
+    saveSettings() {
+        if (this.isLoadingSettings) {
+            return;
+        }
+        
+        const settings = {
+            currentColor: this.currentColor,
+            strokeWidth: this.strokeWidth,
+            fontSize: this.fontSize
+        };
+        localStorage.setItem('imageEditor_settings', JSON.stringify(settings));
+    }
+    
+    // 設定の読み込み
+    loadSettings() {
+        this.isLoadingSettings = true;
+        
+        try {
+            const savedSettings = localStorage.getItem('imageEditor_settings');
+            if (savedSettings) {
+                const settings = JSON.parse(savedSettings);
+                
+                // 色設定を復元
+                if (settings.currentColor) {
+                    this.currentColor = settings.currentColor;
+                    const colorButton = document.getElementById('colorButton');
+                    const colorPicker = document.getElementById('colorPicker');
+                    const customColorPicker = document.getElementById('customColorPicker');
+                    
+                    if (colorButton) colorButton.style.backgroundColor = settings.currentColor;
+                    if (colorPicker) colorPicker.value = settings.currentColor;
+                    if (customColorPicker) customColorPicker.value = settings.currentColor;
+                    
+                    this.updateActivePresetColor(settings.currentColor);
+                }
+                
+                // 線の太さを復元
+                if (settings.strokeWidth) {
+                    this.strokeWidth = settings.strokeWidth;
+                    const strokeDisplay = document.getElementById('strokeDisplay');
+                    if (strokeDisplay) strokeDisplay.textContent = settings.strokeWidth;
+                    this.updateActiveStrokeOption(settings.strokeWidth);
+                }
+                
+                // フォントサイズを復元
+                if (settings.fontSize) {
+                    this.fontSize = settings.fontSize;
+                    this.updateActiveFontSizeOption(settings.fontSize);
+                }
+                
+                // UIを更新
+                this.updateStrokeDisplayForTool();
+            } else {
+                // 保存された設定がない場合のデフォルト値を設定
+                this.currentColor = '#ff0000';
+                this.strokeWidth = 4;
+                this.fontSize = 16;
+                
+                // UIにデフォルト値を反映
+                const colorButton = document.getElementById('colorButton');
+                const colorPicker = document.getElementById('colorPicker');
+                const customColorPicker = document.getElementById('customColorPicker');
+                const strokeDisplay = document.getElementById('strokeDisplay');
+                
+                if (colorButton) colorButton.style.backgroundColor = this.currentColor;
+                if (colorPicker) colorPicker.value = this.currentColor;
+                if (customColorPicker) customColorPicker.value = this.currentColor;
+                if (strokeDisplay) strokeDisplay.textContent = this.strokeWidth;
+                
+                this.updateActivePresetColor(this.currentColor);
+                this.updateActiveStrokeOption(this.strokeWidth);
+                this.updateActiveFontSizeOption(this.fontSize);
+                this.updateStrokeDisplayForTool();
+            }
+        } catch (error) {
+            console.error('設定の読み込みに失敗しました:', error);
+        } finally {
+            this.isLoadingSettings = false;
+        }
     }
 }
 
