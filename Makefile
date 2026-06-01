@@ -50,6 +50,8 @@ dist: build
 	@cd $(BUILD_DIR) && zip -r ../$(DIST_ZIP) . -x "*.DS_Store" "*Thumbs.db"
 	@echo "Distribution package created: $(DIST_ZIP)"
 	@echo "File size: $$(du -h $(DIST_ZIP) | cut -f1)"
+	@rm -rf $(BUILD_DIR)
+	@echo "Removed $(BUILD_DIR)/"
 
 # 開発用：ブラウザでテスト
 test-browser:

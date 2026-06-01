@@ -21,6 +21,28 @@ body {
     height: 100vh;
 }
 
+.dev-environment-badge {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 2000;
+    padding: 8px 12px;
+    border: 1px solid #b3261e;
+    border-radius: 4px;
+    background-color: #d93025;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+}
+
+.dev-environment-badge[hidden] {
+    display: none;
+}
+
 .header {
     background-color: #2c3e50;
     color: white;
@@ -604,4 +626,3 @@ body {
     opacity: 1;
     visibility: visible;
 }
-

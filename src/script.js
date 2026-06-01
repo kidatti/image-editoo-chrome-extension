@@ -24,6 +24,7 @@ class ImageEditor {
         
         this.isLoadingSettings = false;
         
+        this.setupDevEnvironmentBadge();
         this.setupCanvas();
         this.setupEventListeners();
         this.setupToolbar();
@@ -33,11 +34,101 @@ class ImageEditor {
             this.loadSettings();
         }, 500);
     }
+
+    async setupDevEnvironmentBadge() {
+        const badge = document.getElementById('devEnvironmentBadge');
+        if (!badge) return;
+
+        const environment = await this.getLocalDevelopmentEnvironment();
+        if (!environment.isLocalDevelopment) return;
+
+        badge.textContent = environment.label;
+        badge.title = environment.description;
+        badge.hidden = false;
+    }
+
+    async getLocalDevelopmentEnvironment() {
+        const { protocol, hostname, search } = window.location;
+        const params = new URLSearchParams(search);
+        const forcedLocal = params.get('env') === 'local' || params.get('dev') === '1';
+        const loopbackHosts = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
+        const isLoopback = loopbackHosts.includes(hostname) || hostname.endsWith('.localhost');
+        const isFile = protocol === 'file:';
+
+        if (forcedLocal) {
+            return {
+                isLocalDevelopment: true,
+                label: 'LOCAL DEV',
+                description: 'Forced local development display'
+            };
+        }
+
+        if (isLoopback) {
+            return {
+                isLocalDevelopment: true,
+                label: 'LOCAL DEV',
+                description: `Local development environment: ${hostname}`
+            };
+        }
+
+        if (isFile) {
+            return {
+                isLocalDevelopment: true,
+                label: 'LOCAL FILE',
+                description: 'Opened from a local file'
+            };
+        }
+
+        const extensionInfo = await this.getExtensionSelfInfo();
+        if (extensionInfo && extensionInfo.installType === 'development') {
+            return {
+                isLocalDevelopment: true,
+                label: '開発版',
+                description: 'Chrome extension loaded unpacked in developer mode'
+            };
+        }
+
+        return {
+            isLocalDevelopment: false,
+            label: '',
+            description: ''
+        };
+    }
+
+    getExtensionSelfInfo() {
+        if (!window.chrome || !chrome.management || !chrome.management.getSelf) {
+            return Promise.resolve(null);
+        }
+
+        return new Promise((resolve) => {
+            try {
+                chrome.management.getSelf((info) => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        resolve(null);
+                        return;
+                    }
+                    resolve(info || null);
+                });
+            } catch (error) {
+                resolve(null);
+            }
+        });
+    }
     
     setupCanvas() {
         this.canvas.width = Math.min(1200, window.innerWidth - 200);
         this.canvas.height = Math.min(800, window.innerHeight - 100);
+        this.updateCanvasDisplaySize();
         this.redraw();
+    }
+
+    updateCanvasDisplaySize() {
+        const maxWidth = Math.max(100, window.innerWidth - 200);
+        const maxHeight = Math.max(100, window.innerHeight - 100);
+        const scale = Math.min(1, maxWidth / this.canvas.width, maxHeight / this.canvas.height);
+
+        this.canvas.style.width = `${Math.round(this.canvas.width * scale)}px`;
+        this.canvas.style.height = `${Math.round(this.canvas.height * scale)}px`;
     }
     
     setupEventListeners() {
@@ -298,30 +389,18 @@ class ImageEditor {
     }
     
     resizeCanvasToImage(img) {
-        const maxWidth = Math.min(1200, window.innerWidth - 200);
-        const maxHeight = Math.min(800, window.innerHeight - 100);
-        
-        let { width, height } = img;
-        
-        if (width > maxWidth) {
-            height = (height * maxWidth) / width;
-            width = maxWidth;
-        }
-        
-        if (height > maxHeight) {
-            width = (width * maxHeight) / height;
-            height = maxHeight;
-        }
-        
-        this.canvas.width = width;
-        this.canvas.height = height;
+        this.canvas.width = img.naturalWidth || img.width;
+        this.canvas.height = img.naturalHeight || img.height;
+        this.updateCanvasDisplaySize();
     }
     
     getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
         return {
-            x: e.clientX - rect.left,
-            y: e.clientY - rect.top
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY
         };
     }
     
@@ -486,18 +565,21 @@ class ImageEditor {
         
         // キャンバスの位置とスケールを計算
         const canvasRect = this.canvas.getBoundingClientRect();
+        const displayScaleX = canvasRect.width / this.canvas.width;
+        const displayScaleY = canvasRect.height / this.canvas.height;
+        const displayFontSize = Math.max(10, Math.round(this.fontSize * displayScaleY));
         
         // テキスト入力要素を作成
         const textInput = document.createElement('input');
         textInput.type = 'text';
         textInput.className = 'inline-text-input';
         textInput.style.position = 'absolute';
-        textInput.style.left = (canvasRect.left + x) + 'px';
-        textInput.style.top = (canvasRect.top + y - 10) + 'px';
+        textInput.style.left = (canvasRect.left + x * displayScaleX) + 'px';
+        textInput.style.top = (canvasRect.top + (y - 10) * displayScaleY) + 'px';
         textInput.style.border = '1px solid #3498db';
         textInput.style.borderRadius = '4px';
         textInput.style.padding = '4px 8px';
-        textInput.style.fontSize = '16px';
+        textInput.style.fontSize = `${displayFontSize}px`;
         textInput.style.fontFamily = 'Arial, sans-serif';
         textInput.style.color = this.currentColor;
         textInput.style.backgroundColor = 'white';
@@ -555,18 +637,21 @@ class ImageEditor {
         
         // キャンバスの位置とスケールを計算
         const canvasRect = this.canvas.getBoundingClientRect();
+        const displayScaleX = canvasRect.width / this.canvas.width;
+        const displayScaleY = canvasRect.height / this.canvas.height;
+        const displayFontSize = Math.max(10, Math.round((textShape.fontSize || 16) * displayScaleY));
         
         // テキスト入力要素を作成
         const textInput = document.createElement('input');
         textInput.type = 'text';
         textInput.className = 'inline-text-input';
         textInput.style.position = 'absolute';
-        textInput.style.left = (canvasRect.left + textShape.x) + 'px';
-        textInput.style.top = (canvasRect.top + textShape.y - 20) + 'px';
+        textInput.style.left = (canvasRect.left + textShape.x * displayScaleX) + 'px';
+        textInput.style.top = (canvasRect.top + (textShape.y - 20) * displayScaleY) + 'px';
         textInput.style.border = '1px solid #3498db';
         textInput.style.borderRadius = '4px';
         textInput.style.padding = '4px 8px';
-        textInput.style.fontSize = `${textShape.fontSize || 16}px`;
+        textInput.style.fontSize = `${displayFontSize}px`;
         textInput.style.fontFamily = 'Arial, sans-serif';
         textInput.style.color = textShape.color;
         textInput.style.backgroundColor = 'white';
@@ -1805,6 +1890,7 @@ class ImageEditor {
     createCanvasWithSize(width, height) {
         this.canvas.width = width;
         this.canvas.height = height;
+        this.updateCanvasDisplaySize();
         this.backgroundImage = null;
         this.shapes = [];
         this.selectedShape = null;
