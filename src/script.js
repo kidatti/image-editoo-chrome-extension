@@ -79,12 +79,12 @@ class ImageEditor {
             };
         }
 
-        const extensionInfo = await this.getExtensionSelfInfo();
-        if (extensionInfo && extensionInfo.installType === 'development') {
+        const appEnvironment = window.IMAGE_EDITOO_ENV;
+        if (appEnvironment && appEnvironment.localDevelopment) {
             return {
                 isLocalDevelopment: true,
-                label: '開発版',
-                description: 'Chrome extension loaded unpacked in developer mode'
+                label: appEnvironment.label || '開発版',
+                description: appEnvironment.description || 'Local development build'
             };
         }
 
@@ -93,26 +93,6 @@ class ImageEditor {
             label: '',
             description: ''
         };
-    }
-
-    getExtensionSelfInfo() {
-        if (!window.chrome || !chrome.management || !chrome.management.getSelf) {
-            return Promise.resolve(null);
-        }
-
-        return new Promise((resolve) => {
-            try {
-                chrome.management.getSelf((info) => {
-                    if (chrome.runtime && chrome.runtime.lastError) {
-                        resolve(null);
-                        return;
-                    }
-                    resolve(info || null);
-                });
-            } catch (error) {
-                resolve(null);
-            }
-        });
     }
     
     setupCanvas() {
@@ -123,12 +103,17 @@ class ImageEditor {
     }
 
     updateCanvasDisplaySize() {
+        if (!this.canvas.width || !this.canvas.height) return;
+
         const maxWidth = Math.max(100, window.innerWidth - 200);
         const maxHeight = Math.max(100, window.innerHeight - 100);
         const scale = Math.min(1, maxWidth / this.canvas.width, maxHeight / this.canvas.height);
+        const displayWidth = Math.round(this.canvas.width * scale);
+        const displayHeight = Math.round(this.canvas.height * scale);
 
-        this.canvas.style.width = `${Math.round(this.canvas.width * scale)}px`;
-        this.canvas.style.height = `${Math.round(this.canvas.height * scale)}px`;
+        this.canvas.style.width = `${displayWidth}px`;
+        this.canvas.style.height = `${displayHeight}px`;
+        this.canvas.style.aspectRatio = `${this.canvas.width} / ${this.canvas.height}`;
     }
     
     setupEventListeners() {
@@ -172,6 +157,10 @@ class ImageEditor {
             } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedShape) {
                 this.deleteSelectedShape();
             }
+        });
+
+        window.addEventListener('resize', () => {
+            this.updateCanvasDisplaySize();
         });
     }
     
@@ -769,20 +758,47 @@ class ImageEditor {
         
         if (length < 10) return; // 短すぎる場合は描画しない
         
-        // 矢印の基本サイズ
-        const baseWidth = this.strokeWidth * 0.6;
-        const maxWidth = this.strokeWidth * 2.8;
-        const headLength = Math.min(length * 0.25, 30);
-        const headWidth = Math.max(this.strokeWidth * 5, 20);
+        const arrowWidth = this.ctx.lineWidth || this.strokeWidth;
+        const tailWidth = Math.max(arrowWidth * 1.4, 6);
+        const shaftWidth = Math.max(arrowWidth * 6.5, 22);
+        const headLength = Math.min(Math.max(length * 0.28, arrowWidth * 12), length * 0.5, 110);
+        const headWidth = Math.max(arrowWidth * 13, shaftWidth * 2.05, 58);
+        const headBaseX = length - headLength;
+        const tailHalf = tailWidth / 2;
+        const shaftHalf = shaftWidth / 2;
+        const headHalf = headWidth / 2;
         
         this.ctx.save();
-        this.ctx.fillStyle = this.ctx.strokeStyle;
-        
-        // 滑らかな矢印の本体を描画
-        this.drawTaperedArrowBody(startX, startY, endX, endY, baseWidth, maxWidth, headLength);
-        
-        // 矢印の先端を描画
-        this.drawCurvedArrowHead(endX, endY, angle, headLength, headWidth);
+        this.ctx.translate(startX, startY);
+        this.ctx.rotate(angle);
+        const arrowColor = this.ctx.strokeStyle;
+        this.ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+        this.ctx.shadowBlur = Math.max(3, arrowWidth * 1.4);
+        this.ctx.shadowOffsetX = Math.max(2, arrowWidth * 0.8);
+        this.ctx.shadowOffsetY = Math.max(2, arrowWidth * 0.8);
+        this.ctx.fillStyle = arrowColor;
+        this.ctx.beginPath();
+
+        // Arrow shape spec: the shaft must widen with smooth curves, and the
+        // head base must face the shaft like the blue reference arrow.
+        this.ctx.moveTo(0, -tailHalf);
+        this.ctx.bezierCurveTo(
+            headBaseX * 0.35, -tailHalf,
+            headBaseX * 0.78, -shaftHalf * 0.72,
+            headBaseX, -shaftHalf
+        );
+        this.ctx.lineTo(headBaseX, -headHalf);
+        this.ctx.lineTo(length, 0);
+        this.ctx.lineTo(headBaseX, headHalf);
+        this.ctx.lineTo(headBaseX, shaftHalf);
+        this.ctx.bezierCurveTo(
+            headBaseX * 0.78, shaftHalf * 0.72,
+            headBaseX * 0.35, tailHalf,
+            0, tailHalf
+        );
+        this.ctx.quadraticCurveTo(-tailHalf, 0, 0, -tailHalf);
+        this.ctx.closePath();
+        this.ctx.fill();
         
         this.ctx.restore();
     }
@@ -1053,7 +1069,7 @@ class ImageEditor {
                     this.ctx.strokeRect(minX, minY, width, height);
                     break;
                 case 'arrow':
-                    const padding = 10;
+                    const padding = Math.max(20, (this.selectedShape.strokeWidth || this.strokeWidth) * 12);
                     const minArrowX = Math.min(this.selectedShape.startX, this.selectedShape.endX) - padding;
                     const minArrowY = Math.min(this.selectedShape.startY, this.selectedShape.endY) - padding;
                     const arrowWidth = Math.abs(this.selectedShape.endX - this.selectedShape.startX) + 2 * padding;
@@ -1189,7 +1205,7 @@ class ImageEditor {
             case 'arrow':
                 // 矢印の近似的な当たり判定（線分の周辺）
                 const distance = this.pointToLineDistance(x, y, shape.startX, shape.startY, shape.endX, shape.endY);
-                return distance <= 10;
+                return distance <= Math.max(16, (shape.strokeWidth || this.strokeWidth) * 9);
                 
             case 'text':
                 // テキストの概算的な当たり判定

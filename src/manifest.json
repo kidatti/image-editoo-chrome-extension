@@ -1,11 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Image Editoo - 簡易画像エディタ",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "画像を読み込んで、図形や文字を追加できます",
   "permissions": [
-    "clipboardRead",
-    "management"
+    "clipboardRead"
   ],
   "action": {
     "default_title": "Image Editoo"

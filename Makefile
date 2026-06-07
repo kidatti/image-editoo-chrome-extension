@@ -13,6 +13,7 @@ VERSION := $(shell grep '"version"' $(SRC_DIR)/manifest.json | sed 's/.*"version
 # ビルド対象ファイル
 SRC_FILES = $(SRC_DIR)/manifest.json \
             $(SRC_DIR)/index.html \
+            $(SRC_DIR)/env.js \
             $(SRC_DIR)/style.css \
             $(SRC_DIR)/script.js \
             $(SRC_DIR)/background.js \
@@ -37,10 +38,12 @@ build: clean
 	@mkdir -p $(BUILD_DIR)
 	@cp -r $(SRC_DIR)/manifest.json $(BUILD_DIR)/
 	@cp -r $(SRC_DIR)/index.html $(BUILD_DIR)/
+	@cp -r $(SRC_DIR)/env.js $(BUILD_DIR)/
 	@cp -r $(SRC_DIR)/style.css $(BUILD_DIR)/
 	@cp -r $(SRC_DIR)/script.js $(BUILD_DIR)/
 	@cp -r $(SRC_DIR)/background.js $(BUILD_DIR)/
 	@if [ -d "$(SRC_DIR)/icons" ]; then cp -r $(SRC_DIR)/icons $(BUILD_DIR)/; fi
+	@printf "window.IMAGE_EDITOO_ENV = {\\n    localDevelopment: false\\n};\\n" > $(BUILD_DIR)/env.js
 	@echo "Build completed in $(BUILD_DIR)/"
 
 # 配布用zipファイルの作成
