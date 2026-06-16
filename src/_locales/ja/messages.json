@@ -1,0 +1,14 @@
+{
+  "extensionName": {
+    "message": "Image Editoo - 簡易画像エディタ",
+    "description": "Chrome と Chrome ウェブストアに表示される拡張機能名。"
+  },
+  "extensionDescription": {
+    "message": "画像を読み込んで、図形、矢印、文字、モザイクをすばやく追加できます。",
+    "description": "Chrome と Chrome ウェブストアに表示される短い説明。"
+  },
+  "extensionActionTitle": {
+    "message": "Image Editoo",
+    "description": "ツールバーアクションのタイトル。"
+  }
+}

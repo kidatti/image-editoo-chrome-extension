@@ -17,6 +17,7 @@ SRC_FILES = $(SRC_DIR)/manifest.json \
             $(SRC_DIR)/style.css \
             $(SRC_DIR)/script.js \
             $(SRC_DIR)/background.js \
+            $(SRC_DIR)/_locales \
             $(SRC_DIR)/icons
 
 # 出力ファイル名
@@ -42,6 +43,7 @@ build: clean
 	@cp -r $(SRC_DIR)/style.css $(BUILD_DIR)/
 	@cp -r $(SRC_DIR)/script.js $(BUILD_DIR)/
 	@cp -r $(SRC_DIR)/background.js $(BUILD_DIR)/
+	@if [ -d "$(SRC_DIR)/_locales" ]; then cp -r $(SRC_DIR)/_locales $(BUILD_DIR)/; fi
 	@if [ -d "$(SRC_DIR)/icons" ]; then cp -r $(SRC_DIR)/icons $(BUILD_DIR)/; fi
 	@printf "window.IMAGE_EDITOO_ENV = {\\n    localDevelopment: false\\n};\\n" > $(BUILD_DIR)/env.js
 	@echo "Build completed in $(BUILD_DIR)/"

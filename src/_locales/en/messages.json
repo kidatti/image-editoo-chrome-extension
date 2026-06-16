@@ -1,0 +1,14 @@
+{
+  "extensionName": {
+    "message": "Image Editoo - Simple Image Editor",
+    "description": "Extension name shown in Chrome and Chrome Web Store."
+  },
+  "extensionDescription": {
+    "message": "Load an image and quickly add shapes, arrows, text, and mosaic effects.",
+    "description": "Short extension description shown in Chrome and Chrome Web Store."
+  },
+  "extensionActionTitle": {
+    "message": "Image Editoo",
+    "description": "Toolbar action title."
+  }
+}
