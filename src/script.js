@@ -942,13 +942,14 @@ class ImageEditor {
             return;
         }
         
-        // 座標を正規化
-        const x = Math.max(0, Math.min(startX, endX));
-        const y = Math.max(0, Math.min(startY, endY));
-        const endXClamped = Math.min(this.canvas.width, Math.max(startX, endX));
-        const endYClamped = Math.min(this.canvas.height, Math.max(startY, endY));
-        const width = endXClamped - x;
-        const height = endYClamped - y;
+        // getImageData は整数ピクセルを返すため、表示倍率から生じる小数座標を
+        // 先にキャンバスのピクセル境界へ揃える。
+        const x = Math.max(0, Math.floor(Math.min(startX, endX)));
+        const y = Math.max(0, Math.floor(Math.min(startY, endY)));
+        const right = Math.min(this.canvas.width, Math.ceil(Math.max(startX, endX)));
+        const bottom = Math.min(this.canvas.height, Math.ceil(Math.max(startY, endY)));
+        const width = right - x;
+        const height = bottom - y;
         
         if (width <= 0 || height <= 0) return;
         
@@ -964,30 +965,28 @@ class ImageEditor {
             return;
         }
         const data = imageData.data;
+        const imageWidth = imageData.width;
+        const imageHeight = imageData.height;
         
         // モザイク処理
-        for (let blockY = 0; blockY < height; blockY += mosaicBlockSize) {
-            for (let blockX = 0; blockX < width; blockX += mosaicBlockSize) {
+        for (let blockY = 0; blockY < imageHeight; blockY += mosaicBlockSize) {
+            for (let blockX = 0; blockX < imageWidth; blockX += mosaicBlockSize) {
                 // ブロック内の色の平均を計算
                 let r = 0, g = 0, b = 0, a = 0;
                 let pixelCount = 0;
                 
-                const blockWidth = Math.min(mosaicBlockSize, width - blockX);
-                const blockHeight = Math.min(mosaicBlockSize, height - blockY);
+                const blockWidth = Math.min(mosaicBlockSize, imageWidth - blockX);
+                const blockHeight = Math.min(mosaicBlockSize, imageHeight - blockY);
                 
                 // ブロック内のピクセルを走査
                 for (let py = blockY; py < blockY + blockHeight; py++) {
                     for (let px = blockX; px < blockX + blockWidth; px++) {
-                        if (px >= 0 && px < width && py >= 0 && py < height) {
-                            const index = (py * width + px) * 4;
-                            if (index < data.length) {
-                                r += data[index];
-                                g += data[index + 1];
-                                b += data[index + 2];
-                                a += data[index + 3];
-                                pixelCount++;
-                            }
-                        }
+                        const index = (py * imageWidth + px) * 4;
+                        r += data[index];
+                        g += data[index + 1];
+                        b += data[index + 2];
+                        a += data[index + 3];
+                        pixelCount++;
                     }
                 }
                 
