@@ -21,6 +21,32 @@ class ImageEditor {
         this.isResizing = false;
         this.resizeHandle = null;
         this.resizeHandles = [];
+
+        this.history = [];
+        this.historyIndex = -1;
+        this.historyLimit = 50;
+        this.isRestoringHistory = false;
+        this.backgroundIds = new WeakMap();
+        this.nextBackgroundId = 1;
+
+        this.cropSelection = null;
+        this.isMovingCrop = false;
+        this.cropDragOffsetX = 0;
+        this.cropDragOffsetY = 0;
+
+        this.zoom = 1;
+        this.fitScale = 1;
+        this.minZoom = 0.25;
+        this.maxZoom = 8;
+        this.panX = 0;
+        this.panY = 0;
+        this.isPanMode = false;
+        this.isPanning = false;
+        this.spacePressed = false;
+        this.panStartClientX = 0;
+        this.panStartClientY = 0;
+        this.panStartX = 0;
+        this.panStartY = 0;
         
         this.isLoadingSettings = false;
         
@@ -28,6 +54,7 @@ class ImageEditor {
         this.setupCanvas();
         this.setupEventListeners();
         this.setupToolbar();
+        this.recordHistory();
         
         // 設定読み込みは最後に実行（DOM要素が確実に利用可能になってから）
         setTimeout(() => {
@@ -105,15 +132,303 @@ class ImageEditor {
     updateCanvasDisplaySize() {
         if (!this.canvas.width || !this.canvas.height) return;
 
-        const maxWidth = Math.max(100, window.innerWidth - 200);
-        const maxHeight = Math.max(100, window.innerHeight - 100);
-        const scale = Math.min(1, maxWidth / this.canvas.width, maxHeight / this.canvas.height);
-        const displayWidth = Math.round(this.canvas.width * scale);
-        const displayHeight = Math.round(this.canvas.height * scale);
+        const container = this.canvas.parentElement;
+        const maxWidth = Math.max(100, (container?.clientWidth || window.innerWidth - 200) - 48);
+        const maxHeight = Math.max(100, (container?.clientHeight || window.innerHeight - 100) - 48);
+        this.fitScale = Math.min(1, maxWidth / this.canvas.width, maxHeight / this.canvas.height);
+        const displayScale = this.fitScale * this.zoom;
+        const displayWidth = Math.max(1, Math.round(this.canvas.width * displayScale));
+        const displayHeight = Math.max(1, Math.round(this.canvas.height * displayScale));
 
         this.canvas.style.width = `${displayWidth}px`;
         this.canvas.style.height = `${displayHeight}px`;
         this.canvas.style.aspectRatio = `${this.canvas.width} / ${this.canvas.height}`;
+        this.canvas.style.setProperty('--pan-x', `${this.panX}px`);
+        this.canvas.style.setProperty('--pan-y', `${this.panY}px`);
+        this.updateZoomUI();
+    }
+
+    updateCanvasTransform() {
+        this.canvas.style.setProperty('--pan-x', `${this.panX}px`);
+        this.canvas.style.setProperty('--pan-y', `${this.panY}px`);
+    }
+
+    setZoom(value, clientX = null, clientY = null) {
+        const nextZoom = Math.max(this.minZoom, Math.min(this.maxZoom, value));
+        if (Math.abs(nextZoom - this.zoom) < 0.001) return;
+
+        const previousZoom = this.zoom;
+        const previousRect = this.canvas.getBoundingClientRect();
+        this.zoom = nextZoom;
+
+        if (clientX !== null && clientY !== null && previousRect.width > 0 && previousRect.height > 0) {
+            const ratio = nextZoom / previousZoom;
+            const distanceFromCenterX = clientX - (previousRect.left + previousRect.width / 2);
+            const distanceFromCenterY = clientY - (previousRect.top + previousRect.height / 2);
+            this.panX += distanceFromCenterX * (1 - ratio);
+            this.panY += distanceFromCenterY * (1 - ratio);
+        }
+
+        this.updateCanvasDisplaySize();
+    }
+
+    resetView() {
+        this.zoom = 1;
+        this.panX = 0;
+        this.panY = 0;
+        this.updateCanvasDisplaySize();
+    }
+
+    updateZoomUI() {
+        const zoomValue = document.getElementById('zoomResetBtn');
+        const zoomInBtn = document.getElementById('zoomInBtn');
+        const zoomOutBtn = document.getElementById('zoomOutBtn');
+        const canvasDimensions = document.getElementById('canvasDimensions');
+        if (zoomValue) zoomValue.textContent = `${Math.round(this.fitScale * this.zoom * 100)}%`;
+        if (zoomInBtn) zoomInBtn.disabled = this.zoom >= this.maxZoom;
+        if (zoomOutBtn) zoomOutBtn.disabled = this.zoom <= this.minZoom;
+        if (canvasDimensions) {
+            canvasDimensions.textContent = `${this.canvas.width} × ${this.canvas.height} px`;
+        }
+    }
+
+    updateViewControlsVisibility() {
+        const visible = this.canvas.classList.contains('visible');
+        const zoomControls = document.getElementById('zoomControls');
+        if (zoomControls) zoomControls.hidden = !visible;
+        this.setCropControlsVisible(this.currentTool === 'crop');
+    }
+
+    updateCanvasCursor() {
+        const pannable = this.spacePressed || this.isPanMode;
+        this.canvas.classList.toggle('is-pannable', pannable && !this.isPanning);
+        this.canvas.classList.toggle('is-panning', this.isPanning);
+
+        if (this.isPanning) {
+            this.canvas.style.cursor = 'grabbing';
+        } else if (pannable) {
+            this.canvas.style.cursor = 'grab';
+        } else {
+            this.canvas.style.cursor = this.currentTool === 'select' ? 'default' : 'crosshair';
+        }
+    }
+
+    createHistorySnapshot() {
+        return {
+            width: this.canvas.width,
+            height: this.canvas.height,
+            backgroundImage: this.backgroundImage,
+            backgroundId: this.getBackgroundId(this.backgroundImage),
+            shapes: JSON.parse(JSON.stringify(this.shapes)),
+            canvasVisible: this.canvas.classList.contains('visible')
+        };
+    }
+
+    getSnapshotSignature(snapshot) {
+        return JSON.stringify({
+            width: snapshot.width,
+            height: snapshot.height,
+            backgroundId: snapshot.backgroundId,
+            shapes: snapshot.shapes,
+            canvasVisible: snapshot.canvasVisible
+        });
+    }
+
+    getBackgroundId(image) {
+        if (!image) return 0;
+        if (!this.backgroundIds.has(image)) {
+            this.backgroundIds.set(image, this.nextBackgroundId++);
+        }
+        return this.backgroundIds.get(image);
+    }
+
+    recordHistory() {
+        if (this.isRestoringHistory) return;
+
+        const snapshot = this.createHistorySnapshot();
+        snapshot.signature = this.getSnapshotSignature(snapshot);
+        const currentSnapshot = this.history[this.historyIndex];
+        if (currentSnapshot?.signature === snapshot.signature) {
+            this.updateHistoryButtons();
+            return;
+        }
+
+        this.history = this.history.slice(0, this.historyIndex + 1);
+        this.history.push(snapshot);
+        if (this.history.length > this.historyLimit) {
+            this.history.shift();
+        }
+        this.historyIndex = this.history.length - 1;
+        this.updateHistoryButtons();
+    }
+
+    undo() {
+        if (this.historyIndex <= 0) return;
+        this.historyIndex -= 1;
+        this.restoreHistorySnapshot(this.history[this.historyIndex]);
+    }
+
+    redo() {
+        if (this.historyIndex >= this.history.length - 1) return;
+        this.historyIndex += 1;
+        this.restoreHistorySnapshot(this.history[this.historyIndex]);
+    }
+
+    restoreHistorySnapshot(snapshot) {
+        if (!snapshot) return;
+
+        this.isRestoringHistory = true;
+        this.cropSelection = null;
+        this.isDrawing = false;
+        this.isDragging = false;
+        this.isResizing = false;
+        this.isMovingCrop = false;
+        this.selectedShape = null;
+        this.canvas.width = snapshot.width;
+        this.canvas.height = snapshot.height;
+        this.backgroundImage = snapshot.backgroundImage;
+        this.shapes = JSON.parse(JSON.stringify(snapshot.shapes));
+
+        const dropZone = document.getElementById('dropZone');
+        this.canvas.classList.toggle('visible', snapshot.canvasVisible);
+        dropZone?.classList.toggle('hidden', snapshot.canvasVisible);
+
+        this.updateCanvasDisplaySize();
+        this.redraw();
+        this.updateUIForSelectedShape();
+        this.updateCropUI();
+        this.updateViewControlsVisibility();
+        this.updateHistoryButtons();
+        this.isRestoringHistory = false;
+    }
+
+    updateHistoryButtons() {
+        const undoBtn = document.getElementById('undoBtn');
+        const redoBtn = document.getElementById('redoBtn');
+        if (undoBtn) undoBtn.disabled = this.historyIndex <= 0;
+        if (redoBtn) redoBtn.disabled = this.historyIndex >= this.history.length - 1;
+    }
+
+    setCropControlsVisible(visible) {
+        const controls = document.getElementById('cropControls');
+        if (!controls) return;
+        controls.hidden = !(visible && this.canvas.classList.contains('visible'));
+        if (!controls.hidden) this.updateCropUI();
+    }
+
+    updateCropUI() {
+        const applyButton = document.getElementById('applyCropBtn');
+        const sizeLabel = document.getElementById('cropSize');
+        const hasSelection = Boolean(this.cropSelection);
+        const hasValidSelection = hasSelection && this.cropSelection.width > 5 && this.cropSelection.height > 5;
+        if (applyButton) applyButton.disabled = !hasValidSelection;
+        if (sizeLabel) {
+            sizeLabel.textContent = hasSelection
+                ? `${Math.round(this.cropSelection.width)} × ${Math.round(this.cropSelection.height)} px`
+                : '範囲をドラッグして選択';
+        }
+    }
+
+    getCropSelectionFromPoints(startX, startY, endX, endY, minimumSize = 0) {
+        const clampedStartX = Math.max(0, Math.min(this.canvas.width, startX));
+        const clampedStartY = Math.max(0, Math.min(this.canvas.height, startY));
+        const clampedEndX = Math.max(0, Math.min(this.canvas.width, endX));
+        const clampedEndY = Math.max(0, Math.min(this.canvas.height, endY));
+        const left = Math.floor(Math.min(clampedStartX, clampedEndX));
+        const top = Math.floor(Math.min(clampedStartY, clampedEndY));
+        const right = Math.ceil(Math.max(clampedStartX, clampedEndX));
+        const bottom = Math.ceil(Math.max(clampedStartY, clampedEndY));
+        const width = right - left;
+        const height = bottom - top;
+
+        if (width <= minimumSize || height <= minimumSize) return null;
+        return { x: left, y: top, width, height };
+    }
+
+    isPointInCropSelection(x, y) {
+        if (!this.cropSelection) return false;
+        return x >= this.cropSelection.x &&
+            x <= this.cropSelection.x + this.cropSelection.width &&
+            y >= this.cropSelection.y &&
+            y <= this.cropSelection.y + this.cropSelection.height;
+    }
+
+    cancelCrop() {
+        this.cropSelection = null;
+        this.isDrawing = false;
+        this.isMovingCrop = false;
+        this.updateCropUI();
+        this.redraw();
+    }
+
+    async applyCrop() {
+        if (!this.cropSelection) return;
+
+        const left = Math.max(0, Math.floor(this.cropSelection.x));
+        const top = Math.max(0, Math.floor(this.cropSelection.y));
+        const right = Math.min(this.canvas.width, Math.ceil(this.cropSelection.x + this.cropSelection.width));
+        const bottom = Math.min(this.canvas.height, Math.ceil(this.cropSelection.y + this.cropSelection.height));
+        const width = right - left;
+        const height = bottom - top;
+        if (width < 1 || height < 1) return;
+
+        const originalWidth = this.canvas.width;
+        const originalHeight = this.canvas.height;
+        const croppedBackground = this.backgroundImage
+            ? await this.createCroppedBackground(left, top, width, height, originalWidth, originalHeight)
+            : null;
+
+        const translatedShapes = this.shapes
+            .filter(shape => this.shapeIntersectsRect(shape, left, top, right, bottom))
+            .map(shape => this.translateShapeCopy(shape, -left, -top));
+
+        this.canvas.width = width;
+        this.canvas.height = height;
+        this.backgroundImage = croppedBackground;
+        this.shapes = translatedShapes;
+        this.selectedShape = null;
+        this.cropSelection = null;
+        this.isMovingCrop = false;
+        this.resetView();
+        this.redraw();
+        this.updateCropUI();
+        this.updateUIForSelectedShape();
+        this.recordHistory();
+    }
+
+    createCroppedBackground(left, top, width, height, originalWidth, originalHeight) {
+        const offscreen = document.createElement('canvas');
+        offscreen.width = width;
+        offscreen.height = height;
+        const context = offscreen.getContext('2d');
+        context.drawImage(this.backgroundImage, -left, -top, originalWidth, originalHeight);
+
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = reject;
+            image.src = offscreen.toDataURL('image/png');
+        });
+    }
+
+    shapeIntersectsRect(shape, left, top, right, bottom) {
+        const bounds = this.getShapeBounds(shape);
+        if (!bounds) return false;
+        return bounds.maxX >= left && bounds.minX <= right && bounds.maxY >= top && bounds.minY <= bottom;
+    }
+
+    translateShapeCopy(shape, deltaX, deltaY) {
+        const copy = JSON.parse(JSON.stringify(shape));
+        if (copy.type === 'text') {
+            copy.x += deltaX;
+            copy.y += deltaY;
+        } else {
+            copy.startX += deltaX;
+            copy.startY += deltaY;
+            copy.endX += deltaX;
+            copy.endY += deltaY;
+        }
+        return copy;
     }
     
     setupEventListeners() {
@@ -150,13 +465,64 @@ class ImageEditor {
         this.canvas.addEventListener('click', (e) => this.handleCanvasClick(e));
         this.canvas.addEventListener('dblclick', (e) => this.handleCanvasDoubleClick(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        this.canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            this.setZoom(this.zoom * factor, e.clientX, e.clientY);
+        }, { passive: false });
         
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
+            const isEditingText = e.target instanceof HTMLInputElement ||
+                e.target instanceof HTMLTextAreaElement || e.target?.isContentEditable;
+
+            if (!isEditingText && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                e.preventDefault();
+                this.redo();
+            } else if (!isEditingText && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    this.redo();
+                } else {
+                    this.undo();
+                }
+            } else if (!isEditingText && (e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '=')) {
+                e.preventDefault();
+                this.setZoom(this.zoom * 1.25);
+            } else if (!isEditingText && (e.ctrlKey || e.metaKey) && e.key === '-') {
+                e.preventDefault();
+                this.setZoom(this.zoom / 1.25);
+            } else if (!isEditingText && (e.ctrlKey || e.metaKey) && e.key === '0') {
+                e.preventDefault();
+                this.resetView();
+            } else if (!isEditingText && e.code === 'Space') {
+                e.preventDefault();
+                this.spacePressed = true;
+                this.updateCanvasCursor();
+            } else if (!isEditingText && e.key === 'Enter' && this.currentTool === 'crop' && this.cropSelection) {
+                e.preventDefault();
+                this.applyCrop();
+            } else if (e.key === 'Escape') {
+                if (this.currentTool === 'crop') {
+                    this.cancelCrop();
+                }
                 this.cancelCurrentAction();
-            } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedShape) {
+            } else if (!isEditingText && (e.key === 'Delete' || e.key === 'Backspace') && this.selectedShape) {
+                e.preventDefault();
                 this.deleteSelectedShape();
             }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') {
+                this.spacePressed = false;
+                if (!this.isPanning) this.updateCanvasCursor();
+            }
+        });
+
+        window.addEventListener('blur', () => {
+            this.spacePressed = false;
+            this.isPanning = false;
+            this.updateCanvasCursor();
         });
 
         window.addEventListener('resize', () => {
@@ -177,14 +543,26 @@ class ImageEditor {
         const fontSizePopup = document.getElementById('fontSizePopup');
         const customColorPicker = document.getElementById('customColorPicker');
         const strokeDisplay = document.getElementById('strokeDisplay');
+        const undoBtn = document.getElementById('undoBtn');
+        const redoBtn = document.getElementById('redoBtn');
+        const panBtn = document.getElementById('panBtn');
+        const zoomInBtn = document.getElementById('zoomInBtn');
+        const zoomOutBtn = document.getElementById('zoomOutBtn');
+        const zoomResetBtn = document.getElementById('zoomResetBtn');
+        const applyCropBtn = document.getElementById('applyCropBtn');
+        const cancelCropBtn = document.getElementById('cancelCropBtn');
         
         toolButtons.forEach(btn => {
             btn.addEventListener('click', () => {
+                if (this.currentTool === 'crop' && btn.dataset.tool !== 'crop') {
+                    this.cancelCrop();
+                }
                 toolButtons.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.currentTool = btn.dataset.tool;
                 console.log('Tool selected:', this.currentTool);
-                this.canvas.style.cursor = 'crosshair';
+                this.isPanMode = false;
+                panBtn?.classList.remove('active');
                 
                 // 選択を解除（selectツールが削除されたため、常に解除）
                 if (this.selectedShape) {
@@ -193,6 +571,8 @@ class ImageEditor {
                 }
                 
                 this.updateStrokeDisplayForTool();
+                this.setCropControlsVisible(this.currentTool === 'crop');
+                this.updateCanvasCursor();
             });
         });
         
@@ -202,6 +582,7 @@ class ImageEditor {
             if (this.selectedShape) {
                 this.selectedShape.color = e.target.value;
                 this.redraw();
+                this.recordHistory();
             }
             this.updateActivePresetColor(e.target.value);
         });
@@ -238,7 +619,26 @@ class ImageEditor {
         
         downloadBtn.addEventListener('click', () => this.downloadImage());
         
-        deleteBtn.addEventListener('click', () => this.clearCanvas());
+        deleteBtn.addEventListener('click', () => {
+            if (this.selectedShape) {
+                this.deleteSelectedShape();
+            } else {
+                this.clearCanvas();
+            }
+        });
+
+        undoBtn?.addEventListener('click', () => this.undo());
+        redoBtn?.addEventListener('click', () => this.redo());
+        zoomInBtn?.addEventListener('click', () => this.setZoom(this.zoom * 1.25));
+        zoomOutBtn?.addEventListener('click', () => this.setZoom(this.zoom / 1.25));
+        zoomResetBtn?.addEventListener('click', () => this.resetView());
+        panBtn?.addEventListener('click', () => {
+            this.isPanMode = !this.isPanMode;
+            panBtn.classList.toggle('active', this.isPanMode);
+            this.updateCanvasCursor();
+        });
+        applyCropBtn?.addEventListener('click', () => this.applyCrop());
+        cancelCropBtn?.addEventListener('click', () => this.cancelCrop());
         
         // カスタムカラーボタンのイベントリスナー
         colorButton.addEventListener('click', (e) => {
@@ -287,7 +687,7 @@ class ImageEditor {
         });
         
         customColorPicker.addEventListener('input', (e) => {
-            this.setColor(e.target.value);
+            this.setColor(e.target.value, false);
         });
         
         
@@ -349,6 +749,11 @@ class ImageEditor {
             const img = new Image();
             img.onload = () => {
                 this.backgroundImage = img;
+                this.shapes = [];
+                this.selectedShape = null;
+                this.zoom = 1;
+                this.panX = 0;
+                this.panY = 0;
                 this.resizeCanvasToImage(img);
                 const dropZone = document.getElementById('dropZone');
                 const canvas = document.getElementById('canvas');
@@ -356,6 +761,8 @@ class ImageEditor {
                 canvas.classList.add('visible');
                 this.redraw();
                 this.updateUIForSelectedShape();
+                this.updateViewControlsVisibility();
+                this.recordHistory();
             };
             img.src = e.target.result;
         };
@@ -366,6 +773,11 @@ class ImageEditor {
         const img = new Image();
         img.onload = () => {
             this.backgroundImage = img;
+            this.shapes = [];
+            this.selectedShape = null;
+            this.zoom = 1;
+            this.panX = 0;
+            this.panY = 0;
             this.resizeCanvasToImage(img);
             const dropZone = document.getElementById('dropZone');
             const canvas = document.getElementById('canvas');
@@ -373,6 +785,8 @@ class ImageEditor {
             canvas.classList.add('visible');
             this.redraw();
             this.updateUIForSelectedShape();
+            this.updateViewControlsVisibility();
+            this.recordHistory();
         };
         img.src = imageUrl;
     }
@@ -394,7 +808,38 @@ class ImageEditor {
     }
     
     startDrawing(e) {
+        if (this.spacePressed || this.isPanMode || e.button === 1) {
+            e.preventDefault();
+            this.isPanning = true;
+            this.panStartClientX = e.clientX;
+            this.panStartClientY = e.clientY;
+            this.panStartX = this.panX;
+            this.panStartY = this.panY;
+            this.updateCanvasCursor();
+            return;
+        }
+
         const pos = this.getMousePos(e);
+
+        if (this.currentTool === 'crop') {
+            this.selectedShape = null;
+
+            if (this.cropSelection && this.isPointInCropSelection(pos.x, pos.y)) {
+                this.isMovingCrop = true;
+                this.cropDragOffsetX = pos.x - this.cropSelection.x;
+                this.cropDragOffsetY = pos.y - this.cropSelection.y;
+                this.canvas.style.cursor = 'grabbing';
+                return;
+            }
+
+            this.isDrawing = true;
+            this.startX = pos.x;
+            this.startY = pos.y;
+            this.cropSelection = null;
+            this.updateCropUI();
+            this.redraw();
+            return;
+        }
         
         // リサイズハンドルのチェック
         if (this.selectedShape) {
@@ -446,7 +891,24 @@ class ImageEditor {
     }
     
     draw(e) {
+        if (this.isPanning) {
+            this.panX = this.panStartX + (e.clientX - this.panStartClientX);
+            this.panY = this.panStartY + (e.clientY - this.panStartClientY);
+            this.updateCanvasTransform();
+            return;
+        }
+
         const pos = this.getMousePos(e);
+
+        if (this.isMovingCrop && this.cropSelection) {
+            const maxX = Math.max(0, this.canvas.width - this.cropSelection.width);
+            const maxY = Math.max(0, this.canvas.height - this.cropSelection.height);
+            this.cropSelection.x = Math.round(Math.max(0, Math.min(maxX, pos.x - this.cropDragOffsetX)));
+            this.cropSelection.y = Math.round(Math.max(0, Math.min(maxY, pos.y - this.cropDragOffsetY)));
+            this.updateCropUI();
+            this.redraw();
+            return;
+        }
         
         if (this.isResizing && this.selectedShape && this.resizeHandle) {
             // リサイズ中の場合、選択されたオブジェクトをリサイズ
@@ -463,22 +925,48 @@ class ImageEditor {
         }
         
         if (!this.isDrawing) return;
+
+        if (this.currentTool === 'crop') {
+            this.cropSelection = this.getCropSelectionFromPoints(
+                this.startX,
+                this.startY,
+                pos.x,
+                pos.y
+            );
+            this.updateCropUI();
+            this.redraw();
+            return;
+        }
         
         this.redraw();
         this.drawPreview(this.startX, this.startY, pos.x, pos.y);
     }
     
     stopDrawing(e) {
+        if (this.isPanning) {
+            this.isPanning = false;
+            this.updateCanvasCursor();
+            return;
+        }
+
+        if (this.isMovingCrop) {
+            this.isMovingCrop = false;
+            this.canvas.style.cursor = 'move';
+            return;
+        }
+
         if (this.isResizing) {
             this.isResizing = false;
             this.resizeHandle = null;
-            this.canvas.style.cursor = this.currentTool === 'select' ? 'default' : 'crosshair';
+            this.updateCanvasCursor();
+            this.recordHistory();
             return;
         }
         
         if (this.isDragging) {
             this.isDragging = false;
-            this.canvas.style.cursor = this.currentTool === 'select' ? 'default' : 'crosshair';
+            this.updateCanvasCursor();
+            this.recordHistory();
             return;
         }
         
@@ -492,6 +980,19 @@ class ImageEditor {
         } else {
             // イベントがない場合は描画開始点と同じ点を使用（キャンセル扱い）
             currentPos = { x: this.startX, y: this.startY };
+        }
+
+        if (this.currentTool === 'crop') {
+            this.cropSelection = this.getCropSelectionFromPoints(
+                this.startX,
+                this.startY,
+                currentPos.x,
+                currentPos.y,
+                5
+            );
+            this.updateCropUI();
+            this.redraw();
+            return;
         }
         
         if (Math.abs(currentPos.x - this.startX) > 5 || Math.abs(currentPos.y - this.startY) > 5) {
@@ -515,6 +1016,7 @@ class ImageEditor {
             this.shapes.push(shape);
             this.redraw();
             this.updateUIForSelectedShape();
+            this.recordHistory();
         }
     }
     
@@ -596,6 +1098,7 @@ class ImageEditor {
                 this.shapes.push(shape);
                 this.redraw();
                 this.updateUIForSelectedShape();
+                this.recordHistory();
                 textAdded = true;
             }
             textInput.remove();
@@ -674,6 +1177,7 @@ class ImageEditor {
                 }
                 textUpdated = true;
             }
+            this.recordHistory();
             textInput.remove();
         };
         
@@ -714,6 +1218,14 @@ class ImageEditor {
                 break;
             case 'mosaic':
                 this.drawMosaicPreview(startX, startY, endX, endY);
+                break;
+            case 'crop':
+                this.drawCropOverlay(
+                    Math.min(startX, endX),
+                    Math.min(startY, endY),
+                    Math.abs(endX - startX),
+                    Math.abs(endY - startY)
+                );
                 break;
         }
     }
@@ -932,6 +1444,22 @@ class ImageEditor {
         this.ctx.strokeRect(startX, startY, endX - startX, endY - startY);
         this.ctx.setLineDash([]);
     }
+
+    drawCropOverlay(x, y, width, height) {
+        if (width <= 0 || height <= 0) return;
+
+        this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.rect(0, 0, this.canvas.width, this.canvas.height);
+        this.ctx.rect(x, y, width, height);
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.48)';
+        this.ctx.fill('evenodd');
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = Math.max(1, 2 / (this.fitScale * this.zoom));
+        this.ctx.setLineDash([8, 5]);
+        this.ctx.strokeRect(x, y, width, height);
+        this.ctx.restore();
+    }
     
     drawMosaic(startX, startY, endX, endY, blockSize = null) {
         console.log('drawMosaic called:', { startX, startY, endX, endY, blockSize });
@@ -1090,6 +1618,15 @@ class ImageEditor {
             
             // リサイズハンドルを描画
             this.drawResizeHandles();
+        }
+
+        if (this.currentTool === 'crop' && this.cropSelection) {
+            this.drawCropOverlay(
+                this.cropSelection.x,
+                this.cropSelection.y,
+                this.cropSelection.width,
+                this.cropSelection.height
+            );
         }
     }
     
@@ -1308,7 +1845,12 @@ class ImageEditor {
     downloadImage() {
         const link = document.createElement('a');
         link.download = 'edited-image.png';
-        link.href = this.canvas.toDataURL();
+        const restoreGuides = this.hideEditingGuides();
+        try {
+            link.href = this.canvas.toDataURL('image/png');
+        } finally {
+            restoreGuides();
+        }
         link.click();
     }
 
@@ -1318,21 +1860,38 @@ class ImageEditor {
                 throw new Error('Clipboard API not supported');
             }
 
-            // キャンバスを blob に変換
-            const canvas = this.canvas;
-            return new Promise(resolve => {
-                canvas.toBlob(async (blob) => {
-                    if (blob) {
-                        const item = new ClipboardItem({ [blob.type]: blob });
-                        await navigator.clipboard.write([item]);
-                        resolve();
-                    }
-                }, 'image/png');
-            });
+            const restoreGuides = this.hideEditingGuides();
+            let blob;
+            try {
+                blob = await new Promise((resolve, reject) => {
+                    this.canvas.toBlob(result => {
+                        if (result) resolve(result);
+                        else reject(new Error('Could not encode canvas'));
+                    }, 'image/png');
+                });
+            } finally {
+                restoreGuides();
+            }
+            const item = new ClipboardItem({ [blob.type]: blob });
+            await navigator.clipboard.write([item]);
         } catch (error) {
             console.error('Failed to copy to clipboard:', error);
             throw error;
         }
+    }
+
+    hideEditingGuides() {
+        const selectedShape = this.selectedShape;
+        const cropSelection = this.cropSelection;
+        this.selectedShape = null;
+        this.cropSelection = null;
+        this.redraw();
+
+        return () => {
+            this.selectedShape = selectedShape;
+            this.cropSelection = cropSelection;
+            this.redraw();
+        };
     }
     
     cancelCurrentAction() {
@@ -1424,6 +1983,7 @@ class ImageEditor {
                 this.selectedShape = null;
                 this.updateUIForSelectedShape();
                 this.redraw();
+                this.recordHistory();
             }
         }
     }
@@ -1446,6 +2006,10 @@ class ImageEditor {
                 const dropZone = document.getElementById('dropZone');
                 dropZone.classList.remove('hidden');
                 canvas.classList.remove('visible');
+                this.cancelCrop();
+                this.resetView();
+                this.updateViewControlsVisibility();
+                this.recordHistory();
             }
         }
     }
@@ -1523,7 +2087,18 @@ class ImageEditor {
     }
     
     handleMouseMove(e) {
-        if (this.isDragging || this.isDrawing || this.isResizing) return;
+        if (this.isDragging || this.isDrawing || this.isResizing || this.isMovingCrop) return;
+
+        if (this.spacePressed || this.isPanMode || this.isPanning) {
+            this.updateCanvasCursor();
+            return;
+        }
+
+        if (this.currentTool === 'crop') {
+            const pos = this.getMousePos(e);
+            this.canvas.style.cursor = this.isPointInCropSelection(pos.x, pos.y) ? 'move' : 'crosshair';
+            return;
+        }
         
         const pos = this.getMousePos(e);
         
@@ -1669,7 +2244,7 @@ class ImageEditor {
         });
     }
     
-    setColor(color) {
+    setColor(color, recordChange = true) {
         this.currentColor = color;
         document.getElementById('colorButton').style.backgroundColor = color;
         document.getElementById('colorPicker').value = color;
@@ -1678,6 +2253,7 @@ class ImageEditor {
         if (this.selectedShape) {
             this.selectedShape.color = color;
             this.redraw();
+            if (recordChange) this.recordHistory();
         }
         
         this.updateActivePresetColor(color);
@@ -1699,6 +2275,7 @@ class ImageEditor {
                 this.selectedShape.strokeWidth = width;
             }
             this.redraw();
+            this.recordHistory();
         }
         
         this.updateActiveStrokeOption(width);
@@ -1851,6 +2428,7 @@ class ImageEditor {
         if (this.selectedShape && this.selectedShape.type === 'text') {
             this.selectedShape.fontSize = fontSize;
             this.redraw();
+            this.recordHistory();
         }
         
         // ボタンの表示を更新
@@ -1903,6 +2481,9 @@ class ImageEditor {
     }
     
     createCanvasWithSize(width, height) {
+        this.zoom = 1;
+        this.panX = 0;
+        this.panY = 0;
         this.canvas.width = width;
         this.canvas.height = height;
         this.updateCanvasDisplaySize();
@@ -1917,7 +2498,9 @@ class ImageEditor {
         
         this.redraw();
         this.updateUIForSelectedShape();
+        this.updateViewControlsVisibility();
         this.hideCanvasSizeControls();
+        this.recordHistory();
     }
     
     // 設定の保存

@@ -53,9 +53,29 @@
                         <rect x="16" y="16" width="4" height="4" fill="currentColor"/>
                     </svg>
                 </button>
+                <button class="icon-btn" id="cropTool" data-tool="crop" title="切り抜き">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M6 2v14a2 2 0 0 0 2 2h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 6h14a2 2 0 0 1 2 2v14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
             </div>
             
-            
+            <div class="tool-group history-controls">
+                <button class="icon-btn tooltip" id="undoBtn" disabled aria-label="元に戻す" data-tooltip="元に戻す (Ctrl/Cmd+Z)">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M9 7 4 12l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M5 12h8a6 6 0 0 1 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+                <button class="icon-btn tooltip" id="redoBtn" disabled aria-label="やり直す" data-tooltip="やり直す (Ctrl/Cmd+Shift+Z)">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="m15 7 5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M19 12h-8a6 6 0 0 0-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+
             <div class="tool-group">
                 <div class="color-picker-wrapper">
                     <button id="colorButton" class="color-button" style="background-color: #ff0000;" title="Color"></button>
@@ -95,6 +115,22 @@
         
         <div class="canvas-container">
             <canvas id="canvas"></canvas>
+            <div id="cropControls" class="crop-controls" hidden>
+                <span id="cropSize">範囲をドラッグして選択</span>
+                <button id="applyCropBtn" class="compact-btn primary" disabled>切り抜く</button>
+                <button id="cancelCropBtn" class="compact-btn">キャンセル</button>
+            </div>
+            <div id="zoomControls" class="zoom-controls" hidden>
+                <span id="canvasDimensions" class="canvas-dimensions" title="画像サイズ">0 × 0 px</span>
+                <button id="panBtn" class="view-control-btn" title="パン (Space+ドラッグ)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M8 11V6a2 2 0 1 1 4 0v4-6a2 2 0 1 1 4 0v6-4a2 2 0 1 1 4 0v8a8 8 0 0 1-8 8h-1a8 8 0 0 1-6.7-3.6L2 15a2 2 0 0 1 3.2-2.4L8 16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <button id="zoomOutBtn" class="view-control-btn" title="縮小">−</button>
+                <button id="zoomResetBtn" class="zoom-value" title="画面に合わせる">100%</button>
+                <button id="zoomInBtn" class="view-control-btn" title="拡大">＋</button>
+            </div>
             <div class="drop-zone" id="dropZone">
                 <div class="initial-actions">
                     <div class="action-item">
