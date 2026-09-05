@@ -6,9 +6,10 @@ EXTENSION_NAME = image-editoo
 SRC_DIR = src
 DIST_DIR = dist
 BUILD_DIR = build
+VERSION_FILE = .version
 
-# manifest.jsonからバージョンを取得
-VERSION := $(shell grep '"version"' $(SRC_DIR)/manifest.json | sed 's/.*"version": "\([^"]*\)".*/\1/')
+# .versionからバージョンを取得
+VERSION := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 
 # ビルド対象ファイル
 SRC_FILES = $(SRC_DIR)/manifest.json \
@@ -24,20 +25,32 @@ SRC_FILES = $(SRC_DIR)/manifest.json \
 ZIP_FILE = $(EXTENSION_NAME)-v$(VERSION).zip
 DIST_ZIP = $(DIST_DIR)/$(ZIP_FILE)
 
-.PHONY: all clean build dist version help
+.PHONY: all clean build dist version validate-version help
 
 # デフォルトターゲット
 all: dist
 
+# バージョン形式の検証（Chrome拡張機能向けの3要素バージョン）
+validate-version:
+	@python3 -c "import pathlib, re, sys; \
+	p = pathlib.Path('$(VERSION_FILE)'); \
+	v = p.read_text().strip() if p.is_file() else ''; \
+	valid = bool(re.fullmatch(r'(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)', v)) and all(int(n) <= 65535 for n in v.split('.')) and v != '0.0.0'; \
+	sys.exit(0) if valid else sys.exit('Invalid version in $(VERSION_FILE): %s (expected x.y.z, each number 0-65535, not 0.0.0)' % (v or '<empty>'))"
+
 # バージョン表示
-version:
+version: validate-version
 	@echo "Current version: $(VERSION)"
 
-# ビルドディレクトリの作成と準備
-build: clean
+# ビルドディレクトリの作成と配布用zipファイルの生成
+build: validate-version clean
 	@echo "Building $(EXTENSION_NAME) v$(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	@cp -r $(SRC_DIR)/manifest.json $(BUILD_DIR)/
+	@python3 -c "import json; \
+	data = json.load(open('$(SRC_DIR)/manifest.json')); \
+	data['version'] = open('$(VERSION_FILE)').read().strip(); \
+	json.dump(data, open('$(BUILD_DIR)/manifest.json', 'w'), indent=2, ensure_ascii=False); \
+	open('$(BUILD_DIR)/manifest.json', 'a').write('\\n')"
 	@cp -r $(SRC_DIR)/index.html $(BUILD_DIR)/
 	@cp -r $(SRC_DIR)/env.js $(BUILD_DIR)/
 	@cp -r $(SRC_DIR)/style.css $(BUILD_DIR)/
@@ -46,15 +59,15 @@ build: clean
 	@if [ -d "$(SRC_DIR)/_locales" ]; then cp -r $(SRC_DIR)/_locales $(BUILD_DIR)/; fi
 	@if [ -d "$(SRC_DIR)/icons" ]; then cp -r $(SRC_DIR)/icons $(BUILD_DIR)/; fi
 	@printf "window.IMAGE_EDITOO_ENV = {\\n    localDevelopment: false\\n};\\n" > $(BUILD_DIR)/env.js
-	@echo "Build completed in $(BUILD_DIR)/"
-
-# 配布用zipファイルの作成
-dist: build
 	@echo "Creating distribution package..."
 	@mkdir -p $(DIST_DIR)
-	@cd $(BUILD_DIR) && zip -r ../$(DIST_ZIP) . -x "*.DS_Store" "*Thumbs.db"
+	@cd $(BUILD_DIR) && zip -r -FS ../$(DIST_ZIP) . -x "*.DS_Store" "*Thumbs.db"
 	@echo "Distribution package created: $(DIST_ZIP)"
 	@echo "File size: $$(du -h $(DIST_ZIP) | cut -f1)"
+	@echo "Unpacked extension available in $(BUILD_DIR)/"
+
+# 配布用zipファイルの作成後、作業ディレクトリを削除
+dist: build
 	@rm -rf $(BUILD_DIR)
 	@echo "Removed $(BUILD_DIR)/"
 
@@ -65,46 +78,46 @@ test-browser:
 	@open "chrome://extensions/"
 
 # バージョンアップ（パッチ）
-bump-patch:
+bump-patch: validate-version
 	@echo "Bumping patch version..."
-	@python3 -c "import json, sys; \
-	data = json.load(open('$(SRC_DIR)/manifest.json')); \
-	v = data['version'].split('.'); \
+	@python3 -c "from pathlib import Path; \
+	p = Path('$(VERSION_FILE)'); \
+	v = p.read_text().strip().split('.'); \
 	v[2] = str(int(v[2]) + 1); \
-	data['version'] = '.'.join(v); \
-	json.dump(data, open('$(SRC_DIR)/manifest.json', 'w'), indent=2, ensure_ascii=False)"
-	@echo "Version updated to: $$(grep '"version"' $(SRC_DIR)/manifest.json | sed 's/.*"version": "\([^"]*\)".*/\1/')"
+	p.write_text('.'.join(v) + '\\n')"
+	@echo "Version updated to: $$(cat $(VERSION_FILE))"
 
 # バージョンアップ（マイナー）
-bump-minor:
+bump-minor: validate-version
 	@echo "Bumping minor version..."
-	@python3 -c "import json, sys; \
-	data = json.load(open('$(SRC_DIR)/manifest.json')); \
-	v = data['version'].split('.'); \
+	@python3 -c "from pathlib import Path; \
+	p = Path('$(VERSION_FILE)'); \
+	v = p.read_text().strip().split('.'); \
 	v[1] = str(int(v[1]) + 1); v[2] = '0'; \
-	data['version'] = '.'.join(v); \
-	json.dump(data, open('$(SRC_DIR)/manifest.json', 'w'), indent=2, ensure_ascii=False)"
-	@echo "Version updated to: $$(grep '"version"' $(SRC_DIR)/manifest.json | sed 's/.*"version": "\([^"]*\)".*/\1/')"
+	p.write_text('.'.join(v) + '\\n')"
+	@echo "Version updated to: $$(cat $(VERSION_FILE))"
 
 # バージョンアップ（メジャー）
-bump-major:
+bump-major: validate-version
 	@echo "Bumping major version..."
-	@python3 -c "import json, sys; \
-	data = json.load(open('$(SRC_DIR)/manifest.json')); \
-	v = data['version'].split('.'); \
+	@python3 -c "from pathlib import Path; \
+	p = Path('$(VERSION_FILE)'); \
+	v = p.read_text().strip().split('.'); \
 	v[0] = str(int(v[0]) + 1); v[1] = '0'; v[2] = '0'; \
-	data['version'] = '.'.join(v); \
-	json.dump(data, open('$(SRC_DIR)/manifest.json', 'w'), indent=2, ensure_ascii=False)"
-	@echo "Version updated to: $$(grep '"version"' $(SRC_DIR)/manifest.json | sed 's/.*"version": "\([^"]*\)".*/\1/')"
+	p.write_text('.'.join(v) + '\\n')"
+	@echo "Version updated to: $$(cat $(VERSION_FILE))"
 
-# バージョンアップしてビルド
-release-patch: bump-patch dist
+# バージョンアップしてビルド（更新後の.versionを再読み込み）
+release-patch: bump-patch
+	@$(MAKE) dist
 	@echo "Patch release completed!"
 
-release-minor: bump-minor dist  
+release-minor: bump-minor
+	@$(MAKE) dist
 	@echo "Minor release completed!"
 
-release-major: bump-major dist
+release-major: bump-major
+	@$(MAKE) dist
 	@echo "Major release completed!"
 
 # クリーンアップ
@@ -137,7 +150,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make              - Build and create distribution package"
 	@echo "  make version      - Show current version"
-	@echo "  make build        - Build extension files"
+	@echo "  make build        - Build extension files and create distribution zip"
 	@echo "  make dist         - Create distribution zip file"
 	@echo "  make clean        - Remove build files"
 	@echo "  make clean-all    - Remove all generated files"
@@ -145,6 +158,7 @@ help:
 	@echo "  make inspect      - Show distribution package contents"
 	@echo ""
 	@echo "Version management:"
+	@echo "  Edit .version     - Set the version used for builds (x.y.z)"
 	@echo "  make bump-patch   - Increment patch version (0.1.0 -> 0.1.1)"
 	@echo "  make bump-minor   - Increment minor version (0.1.0 -> 0.2.0)"
 	@echo "  make bump-major   - Increment major version (0.1.0 -> 1.0.0)"

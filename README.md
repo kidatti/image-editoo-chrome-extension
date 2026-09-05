@@ -84,6 +84,24 @@
 - **クリアボタン**: 画像全体を削除（確認ダイアログあり）
 - **保存ボタン**: 編集した画像をPNGファイルとしてダウンロード
 
+## ビルドとバージョン管理
+
+プロジェクトルートの `.version` が配布パッケージのバージョンです。`x.y.z` 形式で指定してください。
+
+```text
+0.5.0
+```
+
+`make build` を実行すると、`.version` の値が配布用の `manifest.json` とzipファイル名（例: `image-editoo-v0.5.0.zip`）に反映されます。展開済みの拡張機能は `build/`、配布用zipは `dist/` に生成されます。`make` または `make dist` でも同じzipを生成し、最後に `build/` を削除します。
+
+```bash
+make version       # 現在のバージョンを表示
+make build         # 展開済みファイルと配布用zipを生成
+make bump-patch    # パッチバージョンを更新
+make bump-minor    # マイナーバージョンを更新
+make bump-major    # メジャーバージョンを更新
+```
+
 ## 技術仕様
 
 ### アーキテクチャ
